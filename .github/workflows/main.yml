@@ -1,0 +1,24 @@
+name: Build driver
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: opi5
+              script: ./install_opi5.sh
+              base_image: https://distrohub.kyiv.ua/armbian-dl/orangepi5/archive/Armbian_25.5.1_Orangepi5_bookworm_vendor_6.1.115_minimal.img.xz
