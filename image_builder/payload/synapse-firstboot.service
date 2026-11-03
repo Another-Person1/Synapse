@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize unique Synapse image SSH identity
+Before=ssh.service synapse-runtime.service
+ConditionPathExists=!/var/lib/synapse/identity-initialized
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/synapse-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

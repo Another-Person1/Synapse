@@ -1,0 +1,7 @@
+{
+  "armbian_index": "https://raw.githubusercontent.com/armbian/armbian.github.io/data/data/armbian-images.json",
+  "python_version": "3.12.16",
+  "python_commit": "2c2462afc5d978d31f3d073001fc202d269917ff",
+  "python_url": "https://codeload.github.com/python/cpython/tar.gz/2c2462afc5d978d31f3d073001fc202d269917ff",
+  "python_sha256": "0f0c7ecf175ce9bce5aee4e42f0462ee09dace53d9a6bade8e41234cbdbf0336"
+}

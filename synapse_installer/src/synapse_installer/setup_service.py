@@ -137,6 +137,19 @@ def setupServiceOnConnectedClient(
 ) -> None:
     """Install the systemd service for Synapse Runtime on the remote machine."""
 
+    # Appliance images already own and enable this unit. Preserve their first-
+    # boot ordering and limited privileges when a normal project is deployed.
+    imageProbe = (
+        "test -f /usr/share/synapse-image/image-metadata.json && "
+        f"test -f /etc/systemd/system/{SERVICE_NAME}.service && echo synapse-image"
+    )
+    stdout, _, _ = _run(client, imageProbe, "Detect a Synapse image", check=False)
+    if stdout.strip() == "synapse-image":
+        if username != "synapse":
+            raise ServiceError("Deploy to a Synapse image using the synapse account")
+        print("Using the preinstalled Synapse image runtime service.")
+        return
+
     stdout, _, _ = _run(client, 'printf %s "$HOME"', "Resolve home directory")
     homeDir = stdout.strip()
     if not homeDir or "\n" in homeDir:

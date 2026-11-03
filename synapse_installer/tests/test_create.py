@@ -55,3 +55,10 @@ def test_create_project_cancelled(mock_text, fake_cwd):
 
     createProject()
     assert not any(fake_cwd.iterdir())
+
+
+def test_generated_project_imports_runtime():
+    # Import the generated entry point without starting its __main__ block.
+    namespace = {"__name__": "generated_project_import_check"}
+    exec(compile(baseMainPy, "generated-main.py", "exec"), namespace)
+    assert callable(namespace["Synapse"].createAndRunRuntime)

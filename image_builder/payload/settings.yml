@@ -1,0 +1,7 @@
+network:
+  team_number: 0
+  name: Synapse
+  ip: null
+  interface: null
+global:
+  cameras: []

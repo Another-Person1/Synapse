@@ -28,6 +28,13 @@
 - `synapse_ui`: Contains the graphical user interface (UI) for interacting with the Synapse runtime.
 - `synapse_imager`: Builds release images for coprocessors with the runtime and a sample project preinstalled.
 
+## Linux images
+
+The [Linux image builder](image_builder/README.md) creates Synapse images from
+the latest supported Armbian Debian CLI minimal releases for Raspberry Pi 4/5,
+Radxa Dragon Q6A, Orange Pi 5 and Orange Pi 5 Plus. The **Synapse Linux images**
+GitHub Actions workflow builds selected boards on demand.
+
 ## License
 
 This project is licensed under the [GNU V3 License](LICENSE).

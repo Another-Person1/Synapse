@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ssh-keygen -A
+install -d -m 0755 /var/lib/synapse
+touch /var/lib/synapse/identity-initialized

@@ -1,0 +1,117 @@
+name: Synapse Linux images
+
+on:
+  pull_request:
+    paths:
+      - image_builder/**
+      - .github/workflows/synapse_images.yml
+  push:
+    branches: [main, codex/synapse-image-builder]
+    paths:
+      - image_builder/**
+      - .github/workflows/synapse_images.yml
+  workflow_dispatch:
+    inputs:
+      board:
+        description: Board to build (all builds every supported board)
+        type: choice
+        options: [all, rpi4b, raspberrypi5, radxa-dragon-q6a, orangepi5, orangepi5-plus]
+        default: all
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synapse-images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - run: sudo apt-get update && sudo apt-get install --yes shellcheck gnupg
+      - run: python -m pytest image_builder/tests -q
+      - run: shellcheck image_builder/*.sh image_builder/payload/*.sh image_builder/payload/synapse-firstboot
+
+  matrix:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    outputs:
+      boards: ${{ steps.select.outputs.boards }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: select
+        env:
+          SELECTED_BOARD: ${{ inputs.board || 'all' }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          boards = json.load(open('image_builder/boards.json'))
+          selected = os.environ['SELECTED_BOARD']
+          assert selected == 'all' or selected in boards
+          print('boards=' + json.dumps(list(boards) if selected == 'all' else [selected]))
+          PY
+
+  wheel:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: synapse_ui/package-lock.json
+      - run: python -m pip install build
+      - run: bash image_builder/build-wheel.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synapse-image-wheel
+          path: dist/image-builder/*.whl
+          if-no-files-found: error
+
+  image:
+    needs: [test, matrix, wheel]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        board: ${{ fromJSON(needs.matrix.outputs.boards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: synapse-image-wheel
+          path: dist/image-builder
+      - name: Install host disk tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            parted gdisk fdisk e2fsprogs util-linux udev xz-utils gnupg
+      - name: Build current supported Debian CLI minimal image
+        env:
+          BOARD: ${{ matrix.board }}
+        run: |
+          wheels=(dist/image-builder/*.whl)
+          test "${#wheels[@]}" -eq 1
+          python3 -m image_builder.build build --board "$BOARD" \
+            --wheel "${wheels[0]}" --work-dir "$RUNNER_TEMP/synapse-image" \
+            --output-dir dist/images
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synapse-${{ matrix.board }}
+          path: dist/images/*
+          if-no-files-found: error
+          retention-days: 14

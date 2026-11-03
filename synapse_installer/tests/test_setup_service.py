@@ -14,6 +14,7 @@ from synapse_installer.setup_service import (
     isServiceActive,
     isServiceSetup,
     restartService,
+    setupServiceOnConnectedClient,
     startService,
     stopService,
     waitForServiceActive,
@@ -51,6 +52,44 @@ def test_restart_service(mock_ssh_client, monkeypatch):
     assert "service restarted" in stdout
     assert stderr == ""
     assert run.call_args.args[1] == f"sudo -n systemctl restart {SERVICE_NAME}"
+
+
+def test_deploy_preserves_image_service(mock_ssh_client, monkeypatch):
+    run = mock.Mock(return_value=("synapse-image\n", "", 1))
+    monkeypatch.setattr(setup_service, "runCommand", run)
+
+    setupServiceOnConnectedClient(mock_ssh_client, "synapse")
+
+    run.assert_called_once()
+    assert "image-metadata.json" in run.call_args.args[1]
+
+
+def test_image_deployment_requires_service_account(mock_ssh_client, monkeypatch):
+    run = mock.Mock(return_value=("synapse-image\n", "", 1))
+    monkeypatch.setattr(setup_service, "runCommand", run)
+
+    with pytest.raises(ServiceError, match="synapse account"):
+        setupServiceOnConnectedClient(mock_ssh_client, "another-user")
+
+
+def test_regular_device_still_creates_service(mock_ssh_client, monkeypatch):
+    run = mock.Mock(
+        side_effect=[
+            ("", "", 1),  # not a Synapse image
+            ("/home/developer\n", "", 0),  # home directory
+            ("", "", 0),  # service file write
+            ("", "", 0),  # daemon-reload
+            ("", "", 0),  # enable
+            ("", "", 0),  # start
+        ]
+    )
+    monkeypatch.setattr(setup_service, "runCommand", run)
+
+    setupServiceOnConnectedClient(mock_ssh_client, "developer")
+
+    commands = [call.args[1] for call in run.call_args_list]
+    assert any("User=developer" in command for command in commands)
+    assert commands[-1] == f"sudo -n systemctl start {SERVICE_NAME}"
 
 
 def test_restart_service_failure_raises(mock_ssh_client, monkeypatch):

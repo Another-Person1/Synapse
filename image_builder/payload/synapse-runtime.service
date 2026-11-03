@@ -1,0 +1,21 @@
+[Unit]
+Description=Synapse vision runtime
+After=network-online.target synapse-firstboot.service
+Wants=network-online.target
+Requires=synapse-firstboot.service
+
+[Service]
+Type=simple
+User=synapse
+Group=synapse
+WorkingDirectory=/home/synapse/Synapse
+ExecStart=/home/synapse/.venv/bin/python /home/synapse/Synapse/main.py
+Environment=PYTHONUNBUFFERED=1
+Environment=TERM=dumb
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target
