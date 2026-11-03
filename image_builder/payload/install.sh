@@ -37,7 +37,7 @@ wheel=$(python3 -c 'import json; print(json.load(open("image-metadata.json"))["w
 /home/synapse/.venv/bin/python -m pip --isolated install \
     --index-url https://pypi.org/simple --only-binary=:all: "$wheel"
 /home/synapse/.venv/bin/python -m pip check
-install -d -o synapse -g synapse /home/synapse/Synapse/{config,pipelines,deploy}
+python3 /tmp/synapse-build/prepare_project.py synapse /home/synapse/Synapse
 install -o synapse -g synapse -m 0644 main.py /home/synapse/Synapse/main.py
 install -o synapse -g synapse -m 0644 settings.yml /home/synapse/Synapse/config/settings.yml
 chown -R synapse:synapse /home/synapse/.venv

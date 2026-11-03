@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-/home/synapse/.venv/bin/python - <<'PY'
+cd /home/synapse/Synapse
+runuser -u synapse -- /home/synapse/.venv/bin/python - <<'PY'
 import importlib.util
 from pathlib import Path
 import cv2, cscore, ntcore, robotpy_apriltag, wpimath
