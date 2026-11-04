@@ -188,6 +188,7 @@ def sha256(path: Path) -> str:
 
 def select_image(index: dict, board: str) -> dict:
     """Choose the newest stable plain Debian minimal image, then recommendation."""
+    source_board = BOARDS[board]["armbian_board"]
     if not isinstance(index, dict) or not isinstance(index.get("assets"), list):
         raise BuildError("Armbian inventory does not contain the expected assets list")
     candidates = []
@@ -195,7 +196,7 @@ def select_image(index: dict, board: str) -> dict:
         if not isinstance(asset, dict):
             raise BuildError("Armbian inventory contains an invalid image record")
         if (
-            asset.get("board_slug") != board
+            asset.get("board_slug") != source_board
             or asset.get("board_support") != "conf"
             or asset.get("variant") != "minimal"
             or asset.get("distro") not in DEBIAN_RELEASES

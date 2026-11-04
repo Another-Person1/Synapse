@@ -17,7 +17,7 @@ def asset(
     filename = f"Armbian_{version}_{source_board.capitalize()}_{distro}_{branch}_6.18.42_minimal.img.xz"
     url = f"https://dl.armbian.com/{source_board}/archive/{filename}"
     result = {
-        "board_slug": board,
+        "board_slug": source_board,
         "board_support": "conf",
         "variant": "minimal",
         "distro": distro,
@@ -40,7 +40,9 @@ def asset(
 @pytest.mark.parametrize("board", build.BOARDS)
 def test_each_board_resolves_official_minimal(board):
     expected = asset(board)
-    other_board = "orangepi5" if board == "rpi4b" else "rpi4b"
+    other_board = (
+        "orangepi5" if build.BOARDS[board]["armbian_board"] == "rpi4b" else "rpi4b"
+    )
     assert (
         build.select_image(
             {"assets": [expected, asset(other_board, version="99.0.0")]}, board
@@ -59,6 +61,22 @@ def test_latest_stable_beats_older_recommendation_and_newer_nightly():
         ]
     }
     assert build.select_image(index, "rpi4b") == stable
+
+
+@pytest.mark.parametrize(
+    "board", ["raspberrypi", "rpi4b", "raspberrypi5", "cm4", "cm5"]
+)
+def test_pi_aliases_select_latest_stable_from_real_upstream_slug(board):
+    latest = asset(version="26.8.2", promoted="false")
+    index = {
+        "assets": [
+            asset(version="26.8.1"),
+            latest,
+            asset(version="99.0.0", board_slug="raspberrypi"),
+            asset(version="26.11.0-trunk.121", download_repository="ci"),
+        ]
+    }
+    assert build.select_image(index, board) == latest
 
 
 def test_version_sort_is_numeric_not_lexical():
