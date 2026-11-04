@@ -28,8 +28,22 @@ apt-get "${apt_options[@]}" install --yes --no-install-recommends \
     python3 build-essential ca-certificates libssl-dev zlib1g-dev libbz2-dev \
     libreadline-dev libsqlite3-dev libffi-dev liblzma-dev libncurses-dev \
     uuid-dev xz-utils libgl1 libglib2.0-0 libatomic1 libstdc++6 \
-    openssh-server avahi-daemon v4l-utils unzip sudo iproute2
+    openssh-server avahi-daemon v4l-utils unzip sudo iproute2 \
+    device-tree-compiler gpiod python3-libgpiod netplan.io
 python3 /tmp/synapse-build/tls_policy.py debian
+board=$(python3 -c 'import json; print(json.load(open("image-metadata.json"))["armbian_board"])')
+python3 /tmp/synapse-build/hardware.py configure --board "$board"
+install -D -m 0644 hardware.py /usr/lib/synapse-image/hardware.py
+netplan generate
+if [[ $board == radxa-dragon-q6a ]]; then
+    update-grub
+    systemctl mask serial-getty@ttyMSM0.service
+elif [[ $board == rpi4b ]]; then
+    systemctl mask serial-getty@serial0.service serial-getty@ttyAMA0.service serial-getty@ttyS0.service hciuart.service
+elif [[ $board == orangepi5 ]]; then
+    # Armbian vendor kernels otherwise force the USB-C controller into host mode.
+    systemctl mask orangepi5-usb2-init.service
+fi
 source_dir=$(mktemp -d /tmp/synapse-python.XXXXXXXX)
 trap 'rm -rf -- "$source_dir"' EXIT
 tar -xzf cpython.tar.gz -C "$source_dir" --strip-components=1
@@ -44,13 +58,17 @@ id synapse >/dev/null 2>&1 || useradd --create-home --shell /bin/bash synapse
 # No shared image password. Retain Armbian's first-login credential setup.
 usermod -aG video synapse
 if getent group render >/dev/null; then usermod -aG render synapse; fi
+for group in gpio spi dialout; do
+    getent group "$group" >/dev/null || groupadd --system "$group"
+    usermod -aG "$group" synapse
+done
 /opt/synapse-python/bin/python3.12 -m venv /home/synapse/.venv
 python3 /tmp/synapse-build/tls_policy.py bootstrap --python /home/synapse/.venv/bin/python
 wheel=$(python3 -c 'import json; print(json.load(open("image-metadata.json"))["wheel"]["filename"])')
 # Binary-only dependencies fail early if RobotPy/OpenCV stop supporting ARM64.
 # Packages come from the official PyPI index; OS Python is never modified.
 /home/synapse/.venv/bin/python -m pip --isolated install \
-    --index-url https://pypi.org/simple --only-binary=:all: "$wheel"
+    --index-url https://pypi.org/simple --only-binary=:all: --requirement hardware-requirements.txt "$wheel"
 /home/synapse/.venv/bin/python -m pip check
 python3 /tmp/synapse-build/prepare_project.py synapse /home/synapse/Synapse
 install -o synapse -g synapse -m 0644 main.py /home/synapse/Synapse/main.py
@@ -61,9 +79,11 @@ cp image-metadata.json /usr/share/synapse-image/
 /home/synapse/.venv/bin/python /tmp/synapse-build/tls_policy.py audit --system > /usr/share/synapse-image/tls-audit.json
 /home/synapse/.venv/bin/python -m pip freeze --all > /usr/share/synapse-image/python-requirements.txt
 dpkg-query -W > /usr/share/synapse-image/debian-packages.txt
-install -m 0644 synapse-runtime.service synapse-firstboot.service /etc/systemd/system/
-install -m 0755 synapse-firstboot /usr/local/sbin/
+install -m 0644 synapse-runtime.service synapse-firstboot.service synapse-usb-ethernet.service /etc/systemd/system/
+install -m 0755 synapse-firstboot synapse-usb-ethernet synapse-pwm-permissions /usr/local/sbin/
+install -D -m 0644 60-synapse-io.rules /etc/udev/rules.d/60-synapse-io.rules
 systemctl enable synapse-runtime.service synapse-firstboot.service ssh.service avahi-daemon.service
+systemctl enable systemd-networkd.service synapse-usb-ethernet.service
 install -d /etc/systemd/journald.conf.d
 printf '[Journal]\nSystemMaxUse=100M\nRuntimeMaxUse=50M\n' > /etc/systemd/journald.conf.d/60-synapse.conf
 # The existing runtime uses sudo for these explicit appliance operations.

@@ -1,0 +1,12 @@
+// Armbian's Orange Pi 5/5 Plus trees route data USB-C through DWC3 controller 0.
+/dts-v1/;
+/plugin/;
+/ {
+    fragment@0 {
+        target = <&usbdrd_dwc3_0>;
+        __overlay__ {
+            dr_mode = "peripheral";
+            status = "okay";
+        };
+    };
+};

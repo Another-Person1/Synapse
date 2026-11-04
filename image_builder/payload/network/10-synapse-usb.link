@@ -1,0 +1,7 @@
+[Match]
+Driver=g_ether
+
+[Link]
+NamePolicy=
+Name=synapseusb0
+MACAddressPolicy=none

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Do not load g_ether on power-only ports or on the Q6A's USB-A OTG port.
+[[ -f /etc/synapse-image/usb-gadget-enabled ]] || exit 0
+# Board/carrier firmware may not expose a UDC. This must not block Synapse boot.
+for ((attempt=0; attempt<15; attempt++)); do
+    compgen -G '/sys/class/udc/*' >/dev/null && break
+    sleep 1
+done
+if ! compgen -G '/sys/class/udc/*' >/dev/null; then
+    echo 'No USB device controller is exposed; USB-C Ethernet is unavailable on this carrier/firmware.' >&2
+    exit 0
+fi
+# Derive distinct, locally administered MACs for every flashed device. The image
+# ships no shared MAC and does not require a network connection to initialize.
+identity=$(cat /etc/machine-id)
+[[ $identity =~ ^[0-9a-f]{32}$ ]] || { echo 'Missing initialized machine ID.' >&2; exit 1; }
+digest=$(printf '%s' "synapse-usb-$identity" | sha256sum)
+mac_suffix=${digest:0:2}:${digest:2:2}:${digest:4:2}:${digest:6:2}:${digest:8:2}
+modprobe g_ether "dev_addr=02:$mac_suffix" "host_addr=06:$mac_suffix"

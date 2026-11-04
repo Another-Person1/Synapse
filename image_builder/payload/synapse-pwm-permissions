@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# udev supplies a kernel device path, never an application-controlled path.
+[[ $# == 1 && $1 == /sys/devices/*/pwm/pwmchip* ]] || exit 1
+for directory in "$1" "$1"/pwm[0-9]*; do
+    [[ -d $directory ]] || continue
+    chgrp gpio "$directory"
+    chmod g+rx "$directory"
+    for attribute in export unexport period duty_cycle enable polarity; do
+        file=$directory/$attribute
+        [[ -f $file ]] || continue
+        chgrp gpio "$file"
+        chmod g+rw "$file"
+    done
+done

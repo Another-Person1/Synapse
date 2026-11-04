@@ -38,6 +38,12 @@ class BuildError(Exception):
     """An input, upstream availability or build requirement could not be met."""
 
 
+def image_targets(selected="all"):
+    """Public artifact names, independent of Armbian's historical board IDs."""
+    boards = BOARDS if selected == "all" else [selected]
+    return list(dict.fromkeys(BOARDS[b].get("image_target", b) for b in boards))
+
+
 def official_url(url: str) -> str:
     """Accept official endpoints and exact paths listed by Armbian's registry."""
     parsed = urllib.parse.urlsplit(url)
@@ -335,13 +341,16 @@ def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dic
         raise BuildError(
             f"Payload already exists: {payload}. Use a fresh work directory."
         )
-    shutil.copytree(HERE / "payload", payload)
+    shutil.copytree(
+        HERE / "payload", payload, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+    )
     shutil.copy2(wheel, payload / wheel.name)
     shutil.copy2(python_source, payload / "cpython.tar.gz")
     metadata = {
         "schema_version": 1,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "board": board,
+        "image_target": image_targets(board)[0],
         "armbian_board": BOARDS[board]["armbian_board"],
         "base": {
             key: asset[key]
@@ -358,6 +367,8 @@ def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dic
         "base_signers": signers,
         "base_signature_url": signature_url,
         "base_signature_sha256": sha256(signature),
+        "hardware_profile_sha256": sha256(HERE / "payload/hardware.py"),
+        "hardware_requirements_sha256": sha256(HERE / "payload/hardware-requirements.txt"),
         "tls_policy_sha256": sha256(HERE / "payload/tls-policy.json"),
         "mirror_registry": MIRROR_REGISTRY,
         "wheel": wheel_info,
@@ -433,7 +444,7 @@ def main(argv=None) -> int:
             base, metadata = prepare(args.board, index, args.wheel.resolve(), work)
             output = args.output_dir.resolve()
             output.mkdir(parents=True, exist_ok=True)
-            filename = f"synapse-{metadata['wheel']['version']}-{args.board}-armbian-{metadata['base']['armbian_version']}.img.xz"
+            filename = f"synapse-{metadata['wheel']['version']}-{metadata['image_target']}-armbian-{metadata['base']['armbian_version']}.img.xz"
             destination = output / filename
             if destination.exists():
                 raise BuildError(f"Refusing to overwrite {destination}")

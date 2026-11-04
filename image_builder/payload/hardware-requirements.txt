@@ -1,0 +1,3 @@
+# Official portable GPIO character-device, SPI, PWM sysfs and UART APIs.
+# https://github.com/vsergeev/python-periphery
+python-periphery==2.5.0

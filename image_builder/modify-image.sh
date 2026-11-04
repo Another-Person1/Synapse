@@ -4,7 +4,7 @@ set -euo pipefail
 [[ $# == 3 ]] || { echo 'Usage: modify-image.sh BASE.img.xz PAYLOAD OUTPUT.img.xz' >&2; exit 2; }
 [[ $(id -u) == 0 ]] || { echo 'Image modification requires root.' >&2; exit 1; }
 [[ $(uname -m) == aarch64 ]] || { echo 'Use a native ARM64 Linux build host.' >&2; exit 1; }
-for tool in losetup lsblk blkid sfdisk parted partprobe sgdisk e2fsck resize2fs mount mountpoint umount chroot xz python3 udevadm; do
+for tool in losetup lsblk blkid sfdisk parted partprobe sgdisk e2fsck fsck.vfat resize2fs mount mountpoint umount chroot xz python3 udevadm; do
     command -v "$tool" >/dev/null || { echo "Missing host tool: $tool" >&2; exit 1; }
 done
 base=$(realpath -- "$1")
@@ -100,6 +100,14 @@ set -e
 resize2fs "$rootdev"
 mount "$rootdev" "$root"
 python3 "$payload/check_target.py" "$root" "$payload/image-metadata.json"
+# Firmware writes and package hooks must reach the actual image partitions.
+# Resolve UUIDs only against this loop device, never against the build host.
+lsblk --json --paths --output NAME,UUID,PARTUUID,FSTYPE "$loop" > "$build_dir/blockdevices.json"
+python3 "$payload/boot_partitions.py" "$root" "$build_dir/blockdevices.json" > "$build_dir/boot-mounts.tsv"
+while IFS=$'\t' read -r device target filesystem; do
+    mkdir -p "$root$target"
+    mount -t "$filesystem" "$device" "$root$target"
+done < "$build_dir/boot-mounts.tsv"
 mount -t proc proc "$root/proc"
 mount --rbind /dev "$root/dev"
 mount --make-rslave "$root/dev"
@@ -147,9 +155,19 @@ fi
 policy_saved=no
 sync
 umount -R "$root"
+e2fsck -fn "$rootdev"
+while IFS=$'\t' read -r device target filesystem; do
+    if [[ $filesystem == vfat ]]; then
+        fsck.vfat -n "$device"
+    else
+        e2fsck -fn "$device"
+    fi
+done < "$build_dir/boot-mounts.tsv"
+sfdisk --verify "$loop"
 losetup -d "$loop"
 loop=''
 # No shrinking: retain Armbian's partition/UUID layout and first-boot expansion.
 xz -T2 -6 --stdout "$build_dir/image.img" > "$build_dir/output.img.xz"
+xz --test "$build_dir/output.img.xz"
 # Same-filesystem link publishes atomically and fails if an output already exists.
 ln -- "$build_dir/output.img.xz" "$destination"

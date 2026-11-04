@@ -1,6 +1,9 @@
 {
-  "rpi4b": {"name": "Raspberry Pi 4", "armbian_board": "rpi4b"},
-  "raspberrypi5": {"name": "Raspberry Pi 5", "armbian_board": "rpi4b"},
+  "raspberrypi": {"name": "Raspberry Pi (Pi 4, Pi 5, CM4, CM5)", "armbian_board": "rpi4b", "image_target": "raspberrypi"},
+  "rpi4b": {"name": "Raspberry Pi 4 (legacy alias)", "armbian_board": "rpi4b", "image_target": "raspberrypi"},
+  "raspberrypi5": {"name": "Raspberry Pi 5 (alias)", "armbian_board": "rpi4b", "image_target": "raspberrypi"},
+  "cm4": {"name": "Raspberry Pi Compute Module 4", "armbian_board": "rpi4b", "image_target": "raspberrypi"},
+  "cm5": {"name": "Raspberry Pi Compute Module 5", "armbian_board": "rpi4b", "image_target": "raspberrypi"},
   "radxa-dragon-q6a": {"name": "Radxa Dragon Q6A", "armbian_board": "radxa-dragon-q6a"},
   "orangepi5": {"name": "Orange Pi 5", "armbian_board": "orangepi5"},
   "orangepi5-plus": {"name": "Orange Pi 5 Plus", "armbian_board": "orangepi5-plus"}

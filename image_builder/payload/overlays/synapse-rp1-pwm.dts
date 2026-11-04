@@ -1,0 +1,23 @@
+// RP1 pinmux and PWM bindings: raspberrypi/linux, rp1.dtsi.
+/dts-v1/;
+/plugin/;
+/ {
+    fragment@0 {
+        target = <&rp1_gpio>;
+        __overlay__ {
+            synapse_pwm_pins: synapse-pwm-pins {
+                pins = "gpio12", "gpio13";
+                function = "pwm0";
+                bias-disable;
+            };
+        };
+    };
+    fragment@1 {
+        target = <&rp1_pwm0>;
+        __overlay__ {
+            pinctrl-names = "default";
+            pinctrl-0 = <&synapse_pwm_pins>;
+            status = "okay";
+        };
+    };
+};

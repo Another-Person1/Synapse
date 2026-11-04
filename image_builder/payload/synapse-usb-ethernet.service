@@ -1,0 +1,12 @@
+[Unit]
+Description=Synapse USB-C Ethernet gadget
+After=systemd-udev-trigger.service
+ConditionPathExists=/etc/synapse-image/usb-gadget-enabled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/synapse-usb-ethernet
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+// Radxa qcs6490-radxa-dragon-q6a.dts and sc7280.dtsi:
+// SPI12 uses GPIO48/49/50/51, separate from UART5 GPIO22/23.
+/dts-v1/;
+/plugin/;
+/ {
+    fragment@1 {
+        target-path = "/";
+        __overlay__ {
+            synapse_pwm: synapse-pwm {
+                compatible = "pwm-gpio";
+                #pwm-cells = <3>;
+                gpios = <&tlmm 25 0>;
+            };
+        };
+    };
+    fragment@0 {
+        target = <&spi12>;
+        __overlay__ {
+            status = "okay";
+            #address-cells = <1>;
+            #size-cells = <0>;
+            synapse_spi: userspace-spi@0 {
+                compatible = "synapse,userspace-spi";
+                reg = <0>;
+                spi-max-frequency = <10000000>;
+            };
+        };
+    };
+};

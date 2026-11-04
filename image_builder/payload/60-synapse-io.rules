@@ -1,0 +1,5 @@
+SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="gpio", MODE="0660"
+SUBSYSTEM=="spidev", KERNEL=="spidev*", GROUP="spi", MODE="0660"
+SUBSYSTEM=="pwm", ACTION=="add|change", RUN+="/usr/local/sbin/synapse-pwm-permissions /sys%p"
+# Linux SPI userspace documentation recommends driver_override for custom IDs.
+SUBSYSTEM=="spi", ACTION=="add", ATTR{modalias}=="spi:userspace-spi", ATTR{driver_override}="spidev", RUN+="/bin/sh -c 'echo %k > /sys/bus/spi/drivers/spidev/bind'"

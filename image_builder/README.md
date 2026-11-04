@@ -10,14 +10,17 @@ before Armbian's recommendation chooses the kernel branch within that release.
 
 | Target | Hardware | Armbian image set |
 | --- | --- | --- |
-| `rpi4b` | Raspberry Pi 4 | `rpi4b` |
-| `raspberrypi5` | Raspberry Pi 5 | `rpi4b`, officially reused by Armbian |
+| `raspberrypi` | Pi 4, Pi 5, CM4, CM5 | shared `rpi4b` base |
 | `radxa-dragon-q6a` | Radxa Dragon Q6A | `radxa-dragon-q6a`, ordinary 512-byte-sector image |
 | `orangepi5` | Orange Pi 5 | `orangepi5` |
 | `orangepi5-plus` | Orange Pi 5 Plus | `orangepi5-plus` |
 
+See [hardware and networking](HARDWARE.md) for `synapse.local:3000`, USB-C Ethernet,
+carrier requirements and the enabled SPI, GPIO, PWM and UART pins. Header I2C is
+not enabled by Synapse. Legacy Pi CLI aliases still resolve to `raspberrypi`.
+
 The initial official inventory check found stable Debian Trixie minimal images
-for all five: Armbian 26.8.1 for Pi 4/5, Q6A and Orange Pi 5, and 26.8.2 for
+for all five originally requested boards: Armbian 26.8.1 for Pi 4/5, Q6A and Orange Pi 5, and 26.8.2 for
 Orange Pi 5 Plus. These versions are observations, not build pins. Releases
 marked `trunk` are not stable releases even when their version number is higher.
 
@@ -26,13 +29,12 @@ marked `trunk` are not stable releases even when their version number is higher.
 Run **Synapse Linux images** with `workflow_dispatch`, selecting one board or
 `all`.
 Pushes changing the builder on `main` or `codex/synapse-image-builder` also build
-four artifacts covering all five boards. Pull requests run checks without privileged image builds.
+four artifacts covering the board families above. Pull requests run checks without privileged image builds.
 The workflow builds the current checkout's Python wheel and static UI once,
 then modifies each distinct board image on a native ARM64 Ubuntu runner.
-Pi 4 and Pi 5 share the `rpi4b` artifact, matching Armbian's official artifact
-reuse configuration. Selecting `raspberrypi5` also builds this shared artifact.
-The image retains Armbian's boot firmware and device trees for both models;
-boot and camera validation on each physical board remain necessary. It uploads
+Pi 4, Pi 5, CM4 and CM5 share the generically named `raspberrypi` artifact.
+Armbian still identifies its shared base as `rpi4b`. The builder checks for all
+four models' firmware trees; carrier-specific boot and camera validation remain necessary. It uploads
 `.img.xz`, `.sha256` and `.json` artifacts and does not publish a release.
 
 ## Build locally
@@ -44,7 +46,7 @@ image modification are not supported. The platform-independent wheel can be
 built on x86 Linux.
 
 Host tools: Python 3.12 with `build`, Bun 1.4.4, `git`,
-`sudo`, `parted`, `gdisk`, `fdisk`, `e2fsprogs`, `util-linux`, `udev`, `xz-utils`, `gnupg`.
+`sudo`, `parted`, `gdisk`, `fdisk`, `e2fsprogs`, `dosfstools`, `util-linux`, `udev`, `xz-utils`, `gnupg`.
 The host's `python3` must support `hashlib.file_digest` (Python 3.11 or later).
 The modifier detects the ext4 root filesystem instead of assuming a partition
 number. It refuses images whose root is not the final partition.
@@ -87,7 +89,8 @@ The application runs as `synapse`, with project files in
 These paths match the current installer, which preserves the image-owned service
 when deploying with the `synapse` account. The initial project has no cameras
 and team number zero. Set the team and camera configuration before robot use.
-The runtime serves the static UI over HTTP on port 3000. It also uses TCP 8765
+The default hostname is `synapse`, and the runtime serves its static UI at
+`http://synapse.local:3000`. It also uses TCP 8765
 for its WebSocket, TCP 8080 for its file server and UDP device discovery; consult
 the runtime configuration before placing the device on a restricted network.
 
@@ -114,7 +117,8 @@ The builder retains Armbian's kernel, device trees, firmware, boot partitions,
 UUID/PARTUUID references and first-boot filesystem expansion. It grows the final
 root partition without shrinking or moving boot partitions. It does not flash
 SPI, alter EEPROM/UEFI firmware, apply PhotonVision-specific optimizations, force
-CPU affinity, install NPU SDKs, disable radios or assume an Ethernet device name.
+CPU affinity or install NPU SDKs. Board-specific UART/PWM provisioning frees the
+Raspberry Pi Bluetooth UART and analogue-audio PWM resources; see the hardware notes.
 Q6A boot media and UFS conversion still require the board vendor's instructions.
 Do not attach multiple clones with identical partition identifiers at once.
 
@@ -158,7 +162,8 @@ these are traceable builds, not byte-for-byte reproducible builds.
 
 ```sh
 .venv/bin/python -m pytest image_builder/tests -q
-shellcheck image_builder/*.sh image_builder/payload/*.sh image_builder/payload/synapse-firstboot
+shellcheck image_builder/*.sh image_builder/payload/*.sh image_builder/payload/synapse-firstboot \
+  image_builder/payload/synapse-usb-ethernet image_builder/payload/synapse-pwm-permissions
 ```
 
 Chroot validation checks native imports, AprilTag dictionary support, packaged
