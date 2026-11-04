@@ -16,6 +16,11 @@ on:
       - "synapse_lib/tools/**"
       - "versions.properties"
 
+# Stop obsolete validation runs when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:

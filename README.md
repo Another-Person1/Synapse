@@ -54,6 +54,15 @@ Pi 4 and Pi 5 use one shared `rpi4b` image, as declared in
 The default image workflow builds four artifacts covering the five boards.
 Selecting Pi 5 explicitly resolves to the same shared Pi artifact.
 
+## Workflow scheduling
+
+Build and test workflows remain automatic. Superseded validation runs are
+cancelled when a newer commit arrives on the same branch or pull request.
+PR labeling, development-library publishing, and PyPI publishing are manual-only
+under Actions. The labeler requires a pull request number. Tagged desktop
+manager builds and manually requested releases retain their existing triggers.
+Image builds run when their application, dependency, or builder inputs change.
+
 ## License
 
 This project is licensed under the [GNU V3 License](LICENSE).

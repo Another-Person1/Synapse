@@ -14,6 +14,11 @@ on:
       - "synapse_net/proto/buf.yaml"
       - "synapse_net/proto/buf.gen.yaml"
 
+# Stop obsolete validation runs when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   protobuf:
     runs-on: ${{ matrix.os }}

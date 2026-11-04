@@ -10,6 +10,15 @@ on:
     paths:
       - image_builder/**
       - .github/workflows/synapse_images.yml
+      - synapse_core/**
+      - synapse_net/**
+      - synapse_installer/**
+      - synapse_ui/**
+      - synapse_sim/src/**
+      - setup.py
+      - MANIFEST.in
+      - pyproject.toml
+      - .bun-version
   workflow_dispatch:
     inputs:
       board:

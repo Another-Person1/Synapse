@@ -15,6 +15,11 @@ on:
       - "MANIFEST.in"
       - ".github/workflows/synapse_sim.yml"
 
+# Stop obsolete validation runs when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest

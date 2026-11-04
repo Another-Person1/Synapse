@@ -1,6 +1,11 @@
 name: "Pull Request Labeler"
 on:
-  pull_request_target:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request to label
+        type: number
+        required: true
 
 jobs:
   triage:
@@ -16,3 +21,4 @@ jobs:
       - uses: actions/labeler@v6
         with:
           sync-labels: true
+          pr-number: ${{ inputs.pull_request_number }}

@@ -9,6 +9,11 @@ on:
     paths:
       - "synapse_manager/**"
 
+# Stop obsolete validation runs when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   format:
     name: Format + Lint
