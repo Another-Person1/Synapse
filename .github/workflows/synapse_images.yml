@@ -30,8 +30,8 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: python -m pip install pytest
@@ -47,7 +47,7 @@ jobs:
     outputs:
       boards: ${{ steps.select.outputs.boards }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: select
         env:
           SELECTED_BOARD: ${{ inputs.board || 'all' }}
@@ -57,7 +57,8 @@ jobs:
           boards = json.load(open('image_builder/boards.json'))
           selected = os.environ['SELECTED_BOARD']
           assert selected == 'all' or selected in boards
-          print('boards=' + json.dumps(list(boards) if selected == 'all' else [selected]))
+          targets = list(dict.fromkeys(board['armbian_board'] for board in boards.values())) if selected == 'all' else [boards[selected]['armbian_board']]
+          print('boards=' + json.dumps(targets))
           PY
 
   wheel:
@@ -65,18 +66,16 @@ jobs:
     needs: test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: synapse_ui/package-lock.json
+          bun-version: "1.4.4"
       - run: python -m pip install build
       - run: bash image_builder/build-wheel.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: synapse-image-wheel
           path: dist/image-builder/*.whl
@@ -92,8 +91,8 @@ jobs:
       matrix:
         board: ${{ fromJSON(needs.matrix.outputs.boards) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           name: synapse-image-wheel
           path: dist/image-builder
@@ -111,7 +110,7 @@ jobs:
           python3 -m image_builder.build build --board "$BOARD" \
             --wheel "${wheels[0]}" --work-dir "$RUNNER_TEMP/synapse-image" \
             --output-dir dist/images
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: synapse-${{ matrix.board }}
           path: dist/images/*

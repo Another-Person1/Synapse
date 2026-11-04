@@ -267,7 +267,7 @@ class SimulationViewer:
                 if not index.is_file() or not bundle.is_file():
                     raise RuntimeError(
                         "Simulation viewer assets are missing. Build them with "
-                        "`npm run build:headless` in synapse_sim."
+                        "`bun run build:headless` in synapse_sim."
                     )
 
                 self._startServer()

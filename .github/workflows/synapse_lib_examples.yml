@@ -20,13 +20,13 @@ jobs:
       matrix:
         example: [aimAtTarget]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Add repository to git safe directories
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
       - name: Set up Java (with Gradle cache)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
@@ -51,10 +51,10 @@ jobs:
       matrix:
         example: [synapseproject, bullseye_project]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           cache: pip
           python-version: "3.12"

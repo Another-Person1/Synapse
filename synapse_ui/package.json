@@ -5,12 +5,12 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "dev": "next dev --turbopack -H 0.0.0.0 -p 8000",
-    "build": "next build && python move_out_to_subdir.py",
-    "start": "next start",
-    "lint": "next lint",
-    "format": "prettier 'src/**/*.{js,ts,tsx}' --write",
-    "test": "jest --passWithNoTests"
+    "dev": "bun --bun next dev --turbopack -H 0.0.0.0 -p 8000",
+    "build": "bun --bun next build && python move_out_to_subdir.py",
+    "start": "bun --bun next start",
+    "lint": "bun --bun next lint",
+    "format": "bun --bun prettier 'src/**/*.{js,ts,tsx}' --write",
+    "test": "bun --bun jest --passWithNoTests"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
@@ -58,5 +58,6 @@
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.4",
     "typescript": "^5.9.3"
-  }
+  },
+  "packageManager": "bun@1.4.4"
 }

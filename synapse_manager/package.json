@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "format": "prettier src --write && cd src-tauri && cargo fmt"
+    "dev": "bun --bun vite",
+    "build": "bun --bun tsc && bun --bun vite build",
+    "preview": "bun --bun vite preview",
+    "tauri": "bun ./node_modules/@tauri-apps/cli/tauri.js",
+    "format": "bun --bun prettier src --write && cd src-tauri && cargo fmt"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
@@ -38,5 +38,6 @@
     "tailwindcss": "^4.3.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
-  }
+  },
+  "packageManager": "bun@1.4.4"
 }

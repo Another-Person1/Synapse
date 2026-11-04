@@ -22,11 +22,18 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10.7"
 
       - name: Install Buf CLI
-        uses: bufbuild/buf-setup-action@v1.50.0
+        uses: bufbuild/buf-action@v1
         with:
+          setup_only: true
+          version: "1.50.0"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check Buf version

@@ -35,6 +35,25 @@ the latest supported Armbian Debian CLI minimal releases for Raspberry Pi 4/5,
 Radxa Dragon Q6A, Orange Pi 5 and Orange Pi 5 Plus. The **Synapse Linux images**
 GitHub Actions workflow builds selected boards on demand.
 
+## JavaScript development
+
+Use Bun 1.4.4, pinned in `.bun-version` and each frontend's `packageManager`.
+In `synapse_ui`, `synapse_sim`, or `synapse_manager`, run
+`bun install --frozen-lockfile` followed by `bun run build` or `bun run dev`.
+The frontend scripts explicitly use Bun's runtime; a separate Node.js or npm
+installation is not required for these project commands. Bun text lockfiles
+replace the previous npm and pnpm lockfiles.
+
+CI follows [Bun's official GitHub Actions guide](https://bun.com/guides/runtime/cicd)
+using `oven-sh/setup-bun@v2`. GitHub's JavaScript actions retain their own
+GitHub-managed runtime; their versions have been updated to use Node.js 24
+instead of the deprecated Node.js 20 runtime.
+
+Pi 4 and Pi 5 use one shared `rpi4b` image, as declared in
+[Armbian's official reusable-board configuration](https://github.com/armbian/armbian.github.io/blob/main/release-targets/reusable.yml).
+The default image workflow builds four artifacts covering the five boards.
+Selecting Pi 5 explicitly resolves to the same shared Pi artifact.
+
 ## License
 
 This project is licensed under the [GNU V3 License](LICENSE).

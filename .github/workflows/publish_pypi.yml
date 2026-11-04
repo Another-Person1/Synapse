@@ -11,29 +11,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: "20.9.0"
+          bun-version: "1.4.4"
 
-      - name: Install Node.js dependencies
+      - name: Install Bun dependencies
         working-directory: synapse_ui
-        run: npm install
+        run: bun install --frozen-lockfile
 
-      - name: Install simulator Node.js dependencies
+      - name: Install simulator Bun dependencies
         working-directory: synapse_sim
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Verify committed simulator renderer bundle
         run: |
-          npm --prefix synapse_sim run build:headless
+          (cd synapse_sim && bun run build:headless)
           git diff --exit-code -- \
             synapse_sim/src/synapse_sim/assets/viewer.bundle.js \
             synapse_sim/src/synapse_sim/assets/index.html

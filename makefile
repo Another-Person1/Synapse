@@ -28,7 +28,7 @@ clean:
 # Install Python package locally
 install:
 	@echo Building UI...
-	@$(CD) synapse_ui && npm run build
+	@$(CD) synapse_ui && bun run build
 	@$(CD) ..
 	@echo Building simulator renderer...
 	@$(CD) synapse_sim && npm run build:headless
@@ -71,10 +71,10 @@ format:
 	@echo Isort format...
 	@python3 -m isort . >$(NULL) 2>&1 || echo isort failed
 	@echo Synapse UI format...
-	@$(CD) synapse_ui && npm run format
+	@$(CD) synapse_ui && bun run format
 	@echo Synapse Manager format...
 	@$(CD) ..
-	@$(CD) synapse_manager && npm run format
+	@$(CD) synapse_manager && bun run format
 	@echo ProtoBuf format...
 	@$(CD) ..
 	@$(CD) synapse_net/proto && \

@@ -26,9 +26,13 @@ marked `trunk` are not stable releases even when their version number is higher.
 Run **Synapse Linux images** with `workflow_dispatch`, selecting one board or
 `all`.
 Pushes changing the builder on `main` or `codex/synapse-image-builder` also build
-all five targets. Pull requests run checks without privileged image builds.
+four artifacts covering all five boards. Pull requests run checks without privileged image builds.
 The workflow builds the current checkout's Python wheel and static UI once,
-then modifies each board image on a native ARM64 Ubuntu runner. It uploads
+then modifies each distinct board image on a native ARM64 Ubuntu runner.
+Pi 4 and Pi 5 share the `rpi4b` artifact, matching Armbian's official artifact
+reuse configuration. Selecting `raspberrypi5` also builds this shared artifact.
+The image retains Armbian's boot firmware and device trees for both models;
+boot and camera validation on each physical board remain necessary. It uploads
 `.img.xz`, `.sha256` and `.json` artifacts and does not publish a release.
 
 ## Build locally
@@ -39,7 +43,7 @@ Do not run this modifier inside an unprivileged container. Native x86 and macOS
 image modification are not supported. The platform-independent wheel can be
 built on x86 Linux.
 
-Host tools: Python 3.12 with `build`, Node.js 20.9 or newer and npm, `git`,
+Host tools: Python 3.12 with `build`, Bun 1.4.4, `git`,
 `sudo`, `parted`, `gdisk`, `fdisk`, `e2fsprogs`, `util-linux`, `udev`, `xz-utils`, `gnupg`.
 The host's `python3` must support `hashlib.file_digest` (Python 3.11 or later).
 The modifier detects the ext4 root filesystem instead of assuming a partition
