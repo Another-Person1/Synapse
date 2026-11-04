@@ -72,6 +72,7 @@ setup(
     package_dir=moduleDirs,
     python_requires=">=3.11, <=3.14",
     install_requires=[
+        "certifi>=2026.10.23",
         "rich",
         "numpy==1.26.4",
         "msgpack",

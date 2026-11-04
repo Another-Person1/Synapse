@@ -44,17 +44,39 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           python-version: ${{ matrix.python }}
           cache: pip
 
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
+
       - uses: oven-sh/setup-bun@v2
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
           bun-version: "1.4.4"
 
+      - name: Verify Bun certificate distrust
+        working-directory: ${{ github.workspace }}
+        run: bun image_builder/check_runtime.ts
+
       - name: Cache Bun + Next.js
         uses: actions/cache@v5
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
           path: |
             ~/.bun/install/cache
@@ -150,12 +172,25 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - uses: oven-sh/setup-bun@v2
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
           bun-version: "1.4.4"
 
+      - name: Verify Bun certificate distrust
+        working-directory: ${{ github.workspace }}
+        run: bun image_builder/check_runtime.ts
+
       - name: Cache Bun + Next.js
         uses: actions/cache@v5
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
           path: |
             ~/.bun/install/cache
@@ -178,7 +213,8 @@ jobs:
           PYTHON_CMD=$(command -v python3 || command -v python)
           $PYTHON_CMD -m venv .venv
           source .venv/bin/activate
-          python -m pip install --upgrade pip
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
           python --version
 
       - name: Install dependencies in venv
@@ -232,10 +268,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           cache: pip
           python-version: "3.12"
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
+
       - run: pip install ".[dev]"
       - run: ruff check .
       - run: isort --check-only --diff .
@@ -245,10 +295,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           cache: pip
           python-version: "3.12"
+
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
 
       - run: |
           pip install ".[dev]"
@@ -260,16 +324,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           python-version: "3.12"
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
+
       - run: |
           # make install
           pip install ".[dev]"
       - run: pip install pytest
 
+      - name: Install current official stable Chrome
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python -m image_builder.setup_browser --output "$RUNNER_TEMP/synapse-chrome" --github-env
+
       - name: Check Chrome
-        run: google-chrome --version
+        run: '"$SYNAPSE_CHROME" --version'
 
       - name: Run tests
         env:

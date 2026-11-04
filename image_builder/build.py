@@ -18,6 +18,8 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from image_builder.payload.tls_policy import hardened_context
+
 HERE = Path(__file__).resolve().parent
 BOARDS = json.loads((HERE / "boards.json").read_text())
 SOURCES = json.loads((HERE / "sources.json").read_text())
@@ -77,7 +79,9 @@ def open_official(url: str):
         official_url(url), headers={"User-Agent": "Synapse-image-builder/1"}
     )
     # Keep the platform proxy, normal CA trust and TLS verification enabled.
-    return urllib.request.build_opener(OfficialRedirects()).open(request, timeout=60)
+    return urllib.request.build_opener(
+        OfficialRedirects(), urllib.request.HTTPSHandler(context=hardened_context())
+    ).open(request, timeout=60)
 
 
 def load_mirrors():
@@ -354,6 +358,7 @@ def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dic
         "base_signers": signers,
         "base_signature_url": signature_url,
         "base_signature_sha256": sha256(signature),
+        "tls_policy_sha256": sha256(HERE / "payload/tls-policy.json"),
         "mirror_registry": MIRROR_REGISTRY,
         "wheel": wheel_info,
         "python": {

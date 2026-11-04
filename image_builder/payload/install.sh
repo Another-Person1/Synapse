@@ -8,14 +8,28 @@ cd /tmp/synapse-build
 # entering this chroot. Do not assume a minimal root already includes Python.
 sha256sum --check SHA256SUMS
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
+apt_options=()
+if [[ -n ${SSL_CERT_FILE:-} ]]; then
+    apt_options=(-o "Acquire::https::CaInfo=$SSL_CERT_FILE")
+fi
+apt-get "${apt_options[@]}" update
+# Refresh installed TLS components from signed distro repositories. Keep the
+# Debian ABI/package names appropriate for this particular base image.
+tls_packages=()
+for package in ca-certificates openssl curl git libssl3 libssl3t64 libgnutls30 libgnutls30t64 libnss3 chromium; do
+    if [[ $(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true) == installed ]]; then
+        tls_packages+=("$package")
+    fi
+done
+apt-get "${apt_options[@]}" install --yes --only-upgrade --no-install-recommends "${tls_packages[@]}"
 # Keep Debian's default Python, board kernel, firmware, bootloader and network
 # configuration intact. Build a private CPython because NumPy 1.26 needs <3.13.
-apt-get install --yes --no-install-recommends \
+apt-get "${apt_options[@]}" install --yes --no-install-recommends \
     python3 build-essential ca-certificates libssl-dev zlib1g-dev libbz2-dev \
     libreadline-dev libsqlite3-dev libffi-dev liblzma-dev libncurses-dev \
     uuid-dev xz-utils libgl1 libglib2.0-0 libatomic1 libstdc++6 \
     openssh-server avahi-daemon v4l-utils unzip sudo iproute2
+python3 /tmp/synapse-build/tls_policy.py debian
 source_dir=$(mktemp -d /tmp/synapse-python.XXXXXXXX)
 trap 'rm -rf -- "$source_dir"' EXIT
 tar -xzf cpython.tar.gz -C "$source_dir" --strip-components=1
@@ -31,6 +45,7 @@ id synapse >/dev/null 2>&1 || useradd --create-home --shell /bin/bash synapse
 usermod -aG video synapse
 if getent group render >/dev/null; then usermod -aG render synapse; fi
 /opt/synapse-python/bin/python3.12 -m venv /home/synapse/.venv
+python3 /tmp/synapse-build/tls_policy.py bootstrap --python /home/synapse/.venv/bin/python
 wheel=$(python3 -c 'import json; print(json.load(open("image-metadata.json"))["wheel"]["filename"])')
 # Binary-only dependencies fail early if RobotPy/OpenCV stop supporting ARM64.
 # Packages come from the official PyPI index; OS Python is never modified.
@@ -43,6 +58,7 @@ install -o synapse -g synapse -m 0644 settings.yml /home/synapse/Synapse/config/
 chown -R synapse:synapse /home/synapse/.venv
 install -d /usr/share/synapse-image
 cp image-metadata.json /usr/share/synapse-image/
+/home/synapse/.venv/bin/python /tmp/synapse-build/tls_policy.py audit --system > /usr/share/synapse-image/tls-audit.json
 /home/synapse/.venv/bin/python -m pip freeze --all > /usr/share/synapse-image/python-requirements.txt
 dpkg-query -W > /usr/share/synapse-image/debian-packages.txt
 install -m 0644 synapse-runtime.service synapse-firstboot.service /etc/systemd/system/

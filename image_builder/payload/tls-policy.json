@@ -1,0 +1,9 @@
+{
+  "bun_version": "1.4.4",
+  "pip_version": "26.3",
+  "certifi_version": "2026.10.23",
+  "distrusted_roots": {
+    "86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b": "emSign ECC Root CA - G3",
+    "d7a7a0fb5d7e2731d771e9484ebcdef71d5f0c3e0a2948782bc83ee0ea699ef4": "AAA Certificate Services"
+  }
+}

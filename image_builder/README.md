@@ -51,6 +51,7 @@ number. It refuses images whose root is not the final partition.
 
 ```sh
 python3.12 -m venv .venv
+.venv/bin/python image_builder/payload/tls_policy.py bootstrap
 .venv/bin/python -m pip install build
 SYNAPSE_BUILD_PYTHON="$PWD/.venv/bin/python" bash image_builder/build-wheel.sh
 
@@ -116,6 +117,14 @@ SPI, alter EEPROM/UEFI firmware, apply PhotonVision-specific optimizations, forc
 CPU affinity, install NPU SDKs, disable radios or assume an Ethernet device name.
 Q6A boot media and UFS conversion still require the board vendor's instructions.
 Do not attach multiple clones with identical partition identifiers at once.
+
+## Certificate security
+
+See [the eMudhra response](SECURITY.md) for the current official tool versions,
+trust-store policy, checks and remaining validation limits. Builds audit Python,
+pip, Certifi and Bun trust, refresh installed image TLS packages through signed
+distro repositories, and reject the two affected CA trust paths. Existing images
+need to be rebuilt and reflashed.
 
 ## Verification and provenance
 

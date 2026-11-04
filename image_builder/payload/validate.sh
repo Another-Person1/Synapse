@@ -13,6 +13,7 @@ assert cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11).bytesLis
 print('Synapse, native ARM64 vision dependencies, and packaged UI validated')
 PY
 /home/synapse/.venv/bin/python -m pip check
+/home/synapse/.venv/bin/python /tmp/synapse-build/tls_policy.py audit --system
 /home/synapse/.venv/bin/python /tmp/synapse-build/smoke.py
 systemctl is-enabled synapse-runtime.service synapse-firstboot.service ssh.service avahi-daemon.service
 systemd-analyze verify /etc/systemd/system/synapse-runtime.service /etc/systemd/system/synapse-firstboot.service

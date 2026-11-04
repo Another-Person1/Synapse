@@ -123,8 +123,19 @@ else
 fi
 resolver_saved=yes
 cp -L /etc/resolv.conf "$root/etc/resolv.conf"
-chroot "$root" /bin/bash /tmp/synapse-build/install.sh
-chroot "$root" /bin/bash /tmp/synapse-build/validate.sh
+# Retain build-host proxy/custom trust only through a temporary read-only mount.
+# Host paths exported by CI do not exist inside the image's chroot.
+python3 "$payload/tls_policy.py" bundle --output "$build_dir/build-ca.pem"
+touch "$root/tmp/synapse-build-ca.pem"
+mount --bind "$build_dir/build-ca.pem" "$root/tmp/synapse-build-ca.pem"
+mount -o remount,bind,ro "$root/tmp/synapse-build-ca.pem"
+mkdir -p "$root/tmp/synapse-empty-ca-directory"
+chroot_env=(SSL_CERT_FILE=/tmp/synapse-build-ca.pem SSL_CERT_DIR=/tmp/synapse-empty-ca-directory REQUESTS_CA_BUNDLE=/tmp/synapse-build-ca.pem CURL_CA_BUNDLE=/tmp/synapse-build-ca.pem PIP_CERT=/tmp/synapse-build-ca.pem GIT_SSL_CAINFO=/tmp/synapse-build-ca.pem GIT_SSL_CAPATH=/tmp/synapse-empty-ca-directory)
+chroot "$root" /usr/bin/env "${chroot_env[@]}" /bin/bash /tmp/synapse-build/install.sh
+chroot "$root" /usr/bin/env "${chroot_env[@]}" /bin/bash /tmp/synapse-build/validate.sh
+umount "$root/tmp/synapse-build-ca.pem"
+rm "$root/tmp/synapse-build-ca.pem"
+rmdir "$root/tmp/synapse-empty-ca-directory"
 
 # Restore temporary host configuration before unmounting and compressing.
 rm "$root/etc/resolv.conf" "$root/usr/sbin/policy-rc.d"

@@ -30,9 +30,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - uses: oven-sh/setup-bun@v2
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
           bun-version: "1.4.4"
+
+      - name: Verify Bun certificate distrust
+        working-directory: ${{ github.workspace }}
+        run: bun image_builder/check_runtime.ts
 
       - name: Install Bun dependencies
         run: bun install --frozen-lockfile
@@ -57,16 +68,35 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           python-version: "3.12"
           cache: pip
+
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
 
       - name: Install Synapse
         run: pip install ".[dev]"
 
+      - name: Install current official stable Chrome
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python -m image_builder.setup_browser --output "$RUNNER_TEMP/synapse-chrome" --github-env
+
       - name: Check Chrome
-        run: google-chrome --version
+        run: '"$SYNAPSE_CHROME" --version'
 
       - name: Verify headless camera rendering
         env:

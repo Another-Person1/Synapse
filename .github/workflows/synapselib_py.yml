@@ -36,11 +36,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - name: Set up Python
         uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           cache: pip
           python-version: "3.12"
+
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
 
       - name: Install Python dependencies
         run: |
@@ -79,10 +93,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - name: Set up Python
         uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           python-version: "3.12"
+
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
 
       - name: Install Ruff and isort
         run: |
@@ -106,10 +134,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - name: Set up Python
         uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           python-version: "3.12"
+
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
 
       - name: Install Python dependencies
         run: pip install .
@@ -132,10 +174,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
       - name: Set up Python
         uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
         with:
+          check-latest: true
           python-version: "3.12"
+
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
 
       - name: Install Python dependencies
         run: pip install .
