@@ -28,9 +28,14 @@ done
 [[ $output == *.tar.xz && ! -e $output ]] || { echo "Output must be a new .tar.xz file: $output" >&2; exit 1; }
 [[ $(id -u) == 0 ]] || { echo 'CPython build requires root (loop devices, chroot).' >&2; exit 1; }
 [[ $(uname -m) == aarch64 ]] || { echo 'Use a native ARM64 Linux build host.' >&2; exit 1; }
-for tool in losetup lsblk blkid sfdisk parted partprobe sgdisk e2fsck resize2fs mount mountpoint umount chroot xz tar python3 udevadm; do
+for tool in losetup lsblk blkid sfdisk parted partprobe sgdisk e2fsck resize2fs mount mountpoint umount unshare chroot xz tar python3 udevadm; do
     command -v "$tool" >/dev/null || { echo "Missing host tool: $tool" >&2; exit 1; }
 done
+# Keep the scratch mounts out of other services' mount namespaces (see modify-image.sh).
+if [[ -z ${SYNAPSE_PRIVATE_MOUNTS:-} ]]; then
+    exec unshare --mount --propagation private \
+        env SYNAPSE_PRIVATE_MOUNTS=1 bash "${BASH_SOURCE[0]}" --board "$board" --work-dir "$work" --output "$output"
+fi
 
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo"

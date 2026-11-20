@@ -4,9 +4,16 @@ set -euo pipefail
 [[ $# == 3 ]] || { echo 'Usage: modify-image.sh BASE.img.xz PAYLOAD OUTPUT.img.xz' >&2; exit 2; }
 [[ $(id -u) == 0 ]] || { echo 'Image modification requires root.' >&2; exit 1; }
 [[ $(uname -m) == aarch64 ]] || { echo 'Use a native ARM64 Linux build host.' >&2; exit 1; }
-for tool in losetup lsblk blkid sfdisk parted partprobe sgdisk e2fsck fsck.vfat resize2fs dumpe2fs fstrim mount mountpoint umount chroot xz python3 udevadm; do
+for tool in losetup lsblk blkid sfdisk parted partprobe sgdisk e2fsck fsck.vfat resize2fs dumpe2fs fstrim mount mountpoint umount unshare chroot xz python3 udevadm; do
     command -v "$tool" >/dev/null || { echo "Missing host tool: $tool" >&2; exit 1; }
 done
+# Mount everything in a private mount namespace. On the host's shared mount
+# tree, the image mounts propagate into other services' namespaces and stay
+# there after umount, keeping the root filesystem busy for the shrink.
+if [[ -z ${SYNAPSE_PRIVATE_MOUNTS:-} ]]; then
+    exec unshare --mount --propagation private \
+        env SYNAPSE_PRIVATE_MOUNTS=1 bash "${BASH_SOURCE[0]}" "$@"
+fi
 base=$(realpath -- "$1")
 payload=$(realpath -- "$2")
 destination=$(realpath -m -- "$3")
@@ -158,6 +165,8 @@ fi
 policy_saved=no
 sync
 umount -R "$root"
+# udev re-probes the partition after the last writer closes it.
+udevadm settle
 
 # Shrink the root filesystem and the final partition back to the actual
 # content plus a small margin. Only the last partition's end moves; partition
