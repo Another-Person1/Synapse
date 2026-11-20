@@ -366,13 +366,23 @@ def prepare(
         python_source = cache / f"cpython-{SOURCES['python_version']}.tar.gz"
         download(SOURCES["python_url"], python_source, SOURCES["python_sha256"])
         shutil.copy2(python_source, payload / "cpython.tar.gz")
+    wheelhouse_files = None
     if wheelhouse is not None:
         if not wheelhouse.is_dir():
             raise BuildError(f"Wheelhouse directory not found: {wheelhouse}")
-        destination = payload / "wheelhouse"
-        shutil.copytree(wheelhouse, destination)
-        if not any(destination.iterdir()):
+        entries = sorted(wheelhouse.iterdir())
+        if not entries:
             raise BuildError(f"Wheelhouse is empty: {wheelhouse}")
+        if any(not p.is_file() or p.suffix != ".whl" for p in entries):
+            raise BuildError("Wheelhouse must contain only wheel files")
+        destination = payload / "wheelhouse"
+        destination.mkdir()
+        wheelhouse_files = []
+        for entry in entries:
+            shutil.copy2(entry, destination / entry.name)
+            wheelhouse_files.append(
+                {"filename": entry.name, "sha256": sha256(destination / entry.name)}
+            )
     metadata = {
         "schema_version": 1,
         "built_at": datetime.now(timezone.utc).isoformat(),
@@ -409,6 +419,7 @@ def prepare(
             )
         },
         "prebuilt_python": prebuilt_python,
+        "wheelhouse": wheelhouse_files,
         "builder_commit": subprocess.check_output(
             ["git", "-C", str(HERE), "rev-parse", "HEAD"], text=True
         ).strip(),
@@ -424,6 +435,9 @@ def prepare(
         sums.append(f"{prebuilt_python['sha256']}  synapse-python.tar.xz\n")
     else:
         sums.append(f"{SOURCES['python_sha256']}  cpython.tar.gz\n")
+    # The chroot re-checks every wheel before pip installs from the wheelhouse.
+    for entry in wheelhouse_files or []:
+        sums.append(f"{entry['sha256']}  wheelhouse/{entry['filename']}\n")
     (payload / "SHA256SUMS").write_text("".join(sums))
     return base, metadata
 

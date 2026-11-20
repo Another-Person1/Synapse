@@ -95,8 +95,8 @@ setup(
         synapseInstallerDep("toml"),
         hardwareManagementDep("psutil"),
         synapseNetDep("protobuf"),
-        # Runtime needs only the base package; the [compiler] extra
-        # (grpcio-tools) is for code generation and lives in the dev extra.
+        # Runtime needs only the base package; the [compiler] extra (black,
+        # jinja2, isort) is for code generation and lives in the dev extra.
         synapseNetDep("betterproto==2.0.0b7"),
         synapseNetDep("websockets"),
     ],

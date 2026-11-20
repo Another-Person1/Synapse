@@ -1,0 +1,13 @@
+# Debian packages needed only to compile the private CPython in
+# /opt/synapse-python. install.sh purges the ones it added once Python is
+# built; the runtime libraries they pulled in are kept.
+build-essential
+libssl-dev
+zlib1g-dev
+libbz2-dev
+libreadline-dev
+libsqlite3-dev
+libffi-dev
+liblzma-dev
+libncurses-dev
+uuid-dev

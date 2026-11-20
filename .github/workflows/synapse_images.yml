@@ -128,12 +128,43 @@ jobs:
           name: synapse-image-wheel
           path: dist/image-builder/*.whl
           if-no-files-found: error
-      - name: Pre-download ARM64 wheels for offline image installs
+
+  # Resolved natively on ARM64 with CPython 3.12, so environment markers and
+  # manylinux tags match the image's interpreter. The image build records and
+  # re-checks every wheel's SHA256 before installing offline from it.
+  wheelhouse:
+    if: github.event_name != 'pull_request'
+    needs: wheel
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
+      - uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          check-latest: true
+          python-version: '3.12'
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
         run: |
-          python -m pip download --dest dist/wheelhouse \
-            --platform manylinux2014_aarch64 --platform linux_aarch64 \
-            --python-version 3.12 --implementation cp --abi cp312 \
-            --only-binary=:all: \
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
+
+      - uses: actions/download-artifact@v8
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          name: synapse-image-wheel
+          path: dist/image-builder
+      - name: Download ARM64 wheels for offline image installs
+        run: |
+          python -m pip download --isolated --index-url https://pypi.org/simple \
+            --only-binary=:all: --dest dist/wheelhouse \
             -r image_builder/payload/hardware-requirements.txt dist/image-builder/*.whl
       - uses: actions/upload-artifact@v7
         env:
@@ -166,19 +197,27 @@ jobs:
           python image_builder/payload/tls_policy.py bootstrap
           python image_builder/payload/tls_policy.py audit
 
+      # The interpreter only changes with its pinned source, the build scripts
+      # or the Debian release, so reuse it until one of those changes. Images
+      # refuse it if their Debian release or architecture differs.
+      - name: Resolve shared CPython cache key
+        id: pythonkey
+        run: |
+          distro=$(python3 -m image_builder.build resolve --board raspberrypi | python3 -c 'import json, sys; print(json.load(sys.stdin)["distro"])')
+          echo "distro=$distro" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v5
+        id: pythoncache
         with:
-          path: ${{ runner.temp }}/synapse-python-build/downloads
-          key: synapse-cpython-${{ hashFiles('image_builder/sources.json') }}
-          restore-keys: synapse-cpython-
+          path: dist/synapse-python.tar.xz
+          key: synapse-cpython-${{ steps.pythonkey.outputs.distro }}-arm64-${{ hashFiles('image_builder/sources.json', 'image_builder/build-python.sh', 'image_builder/payload/build_cpython.sh', 'image_builder/payload/cpython-build-packages.txt', 'image_builder/payload/runtime_libraries.py') }}
       - name: Install host disk tools
+        if: steps.pythoncache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            parted gdisk e2fsprogs util-linux udev xz-utils
-      # Every image target is Debian trixie arm64, so one build is shared by
-      # all boards; payload/install.sh unpacks it instead of compiling.
+            parted gdisk fdisk e2fsprogs util-linux udev xz-utils gnupg
       - name: Build shared CPython once
+        if: steps.pythoncache.outputs.cache-hit != 'true'
         run: |
           sudo -E bash image_builder/build-python.sh --board raspberrypi \
             --work-dir "$RUNNER_TEMP/synapse-python-build" \
@@ -192,7 +231,7 @@ jobs:
           if-no-files-found: error
 
   image:
-    needs: [test, matrix, wheel, cpython]
+    needs: [test, matrix, wheel, wheelhouse, cpython]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     strategy:
@@ -238,7 +277,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/synapse-image/downloads
           key: synapse-base-${{ steps.basekey.outputs.key }}
-          restore-keys: synapse-base-
       - name: Install host disk tools
         run: |
           sudo apt-get update

@@ -269,6 +269,67 @@ def test_prepare_records_actual_inputs_and_copies_verified_payload(
         build.prepare("raspberrypi5", {"assets": [asset("raspberrypi5")]}, wheel, work)
 
 
+def test_prepare_hashes_prebuilt_python_and_every_wheelhouse_wheel(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(build, "load_mirrors", lambda: None)
+    monkeypatch.setattr(build, "verify_signature", lambda image, signature: ["s"])
+    wheel = make_wheel(tmp_path / "synapsefrc-1.0-py3-none-any.whl")
+    base_contents = b"official base"
+    base_hash = hashlib.sha256(base_contents).hexdigest()
+
+    def remote(url):
+        if "cpython" in url:
+            raise AssertionError("CPython source must not be fetched when prebuilt")
+        if url.endswith(".sha"):
+            return io.BytesIO(base_hash.encode())
+        return io.BytesIO(base_contents)
+
+    monkeypatch.setattr(build, "open_official", remote)
+    tarball = tmp_path / "synapse-python.tar.xz"
+    tarball.write_bytes(b"prebuilt interpreter")
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    (wheelhouse / "numpy-1.26.4-cp312-cp312-manylinux_2_17_aarch64.whl").write_bytes(b"n")
+    (wheelhouse / "napa_vision-0.5.1-py3-none-any.whl").write_bytes(b"a")
+    work = tmp_path / "work"
+    work.mkdir()
+    _, metadata = build.prepare(
+        "rpi4b", {"assets": [asset()]}, wheel, work, tarball, wheelhouse
+    )
+    payload = work / "payload"
+    assert not (payload / "cpython.tar.gz").exists()
+    assert metadata["prebuilt_python"]["sha256"] == build.sha256(tarball)
+    assert [w["filename"] for w in metadata["wheelhouse"]] == sorted(
+        p.name for p in wheelhouse.iterdir()
+    )
+    sums = (payload / "SHA256SUMS").read_text().splitlines()
+    assert f"{build.sha256(tarball)}  synapse-python.tar.xz" in sums
+    for entry in metadata["wheelhouse"]:
+        assert f"{entry['sha256']}  wheelhouse/{entry['filename']}" in sums
+
+
+def test_prepare_rejects_non_wheel_wheelhouse_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "load_mirrors", lambda: None)
+    monkeypatch.setattr(build, "verify_signature", lambda image, signature: ["s"])
+    base_hash = hashlib.sha256(b"base").hexdigest()
+    monkeypatch.setattr(
+        build,
+        "open_official",
+        lambda url: io.BytesIO(base_hash.encode() if url.endswith(".sha") else b"base"),
+    )
+    wheel = make_wheel(tmp_path / "synapsefrc-1.0-py3-none-any.whl")
+    tarball = tmp_path / "synapse-python.tar.xz"
+    tarball.write_bytes(b"prebuilt")
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    (wheelhouse / "install.sh").write_text("echo not a wheel\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    with pytest.raises(build.BuildError, match="only wheel files"):
+        build.prepare("rpi4b", {"assets": [asset()]}, wheel, work, tarball, wheelhouse)
+
+
 def test_checksum_url_must_match_image(tmp_path):
     wheel = make_wheel(tmp_path / "synapsefrc-1.0-py3-none-any.whl")
     candidate = asset(file_url_sha="https://dl.armbian.com/different.sha")

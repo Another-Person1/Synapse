@@ -86,7 +86,10 @@ PY
 # Reserve space for CPython compilation and binary Python dependencies.
 truncate -s +6G "$build_dir/image.img"
 losetup -c "$loop"
-if [[ $(blkid -s PTTYPE -o value "$loop") == gpt ]]; then
+# Recorded once: only GPT has a backup header at the end of the disk, and an
+# MBR table must never be rewritten as GPT (that changes PARTUUIDs on boot).
+pttype=$(blkid -s PTTYPE -o value "$loop")
+if [[ $pttype == gpt ]]; then
     sgdisk --move-second-header "$loop"
 fi
 parted --script "$loop" resizepart "$partition" 100%
@@ -154,9 +157,6 @@ if [[ -e $build_dir/policy-rc.d || -L $build_dir/policy-rc.d ]]; then
 fi
 policy_saved=no
 sync
-# Discard freed blocks so deleted build artifacts compress as zeros.
-# No-op where the loop device or backing file does not support discard.
-fstrim -v "$root" || true
 umount -R "$root"
 
 # Shrink the root filesystem and the final partition back to the actual
@@ -164,24 +164,38 @@ umount -R "$root"
 # starts and UUIDs are untouched, and Armbian's first boot still expands the
 # partition to the full SD/eMMC. This keeps the shipped image small enough for
 # 8 GB cards/eMMC instead of carrying the build headroom.
+# -p repairs only what is safe without asking; anything worse stops the build.
 set +e
-e2fsck -fy "$rootdev"
+e2fsck -pf "$rootdev"
 fsck_status=$?
 set -e
 (( fsck_status <= 1 )) || exit "$fsck_status"
 resize2fs -M "$rootdev"
 read -r block_count block_size < <(dumpe2fs -h "$rootdev" 2>/dev/null | awk -F': *' '/^Block count:/ {c=$2} /^Block size:/ {s=$2} END {print c, s}')
 plan=$(python3 "$payload/shrink_root.py" "$build_dir/partitions.json" "$rootdev" "$block_count" "$block_size")
-new_fs_blocks=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["new_fs_blocks"])' "$plan")
-new_end_sector=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["new_end_sector"])' "$plan")
-new_file_bytes=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["new_file_bytes"])' "$plan")
+read -r start_sector new_end_sector new_fs_blocks new_file_bytes < <(python3 -c 'import json, sys; p = json.loads(sys.argv[1]); print(p["start_sector"], p["new_end_sector"], p["new_fs_blocks"], p["new_file_bytes"])' "$plan")
 resize2fs "$rootdev" "$new_fs_blocks"
-parted --script "$loop" resizepart "$partition" "${new_end_sector}s"
+# sfdisk changes only this partition's size (start, type and UUIDs are kept)
+# and, unlike parted, never stops to ask before shrinking in a script.
+echo ", $((new_end_sector - start_sector))" | sfdisk --no-reread --no-tell-kernel \
+    --wipe never --wipe-partitions never -N "$partition" "$loop"
 truncate -s "$new_file_bytes" "$build_dir/image.img"
 losetup -c "$loop"
-sgdisk --move-second-header "$loop"
+if [[ $pttype == gpt ]]; then
+    sgdisk --move-second-header "$loop"
+fi
 partprobe "$loop"
 udevadm settle
+partition_sectors=$(cat "/sys/class/block/$(basename -- "$rootdev")/size")
+(( partition_sectors * 512 >= new_fs_blocks * block_size )) || {
+    echo 'Shrunk partition is smaller than its filesystem; refusing the image.' >&2
+    exit 1
+}
+# Discard the blocks freed by the build and by the shrink so they compress as
+# zeros. Done after the shrink, because resize2fs -M relocates data.
+mount "$rootdev" "$root"
+fstrim -v "$root" || echo 'fstrim is unsupported here; the image will compress less well.' >&2
+umount "$root"
 
 e2fsck -fn "$rootdev"
 while IFS=$'\t' read -r device target filesystem; do
@@ -194,8 +208,9 @@ done < "$build_dir/boot-mounts.tsv"
 sfdisk --verify "$loop"
 losetup -d "$loop"
 loop=''
-# Compress with every available core; the level stays at -6.
-xz -T0 -6 --stdout "$build_dir/image.img" > "$build_dir/output.img.xz"
+# Download size matters more than build time: use xz's strongest preset on
+# every core. Decompressing needs only ~65 MiB, fine for any flashing tool.
+xz -T0 -9 --stdout "$build_dir/image.img" > "$build_dir/output.img.xz"
 xz --test "$build_dir/output.img.xz"
 # Same-filesystem link publishes atomically and fails if an output already exists.
 ln -- "$build_dir/output.img.xz" "$destination"

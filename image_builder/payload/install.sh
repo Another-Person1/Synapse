@@ -8,6 +8,11 @@ cd /tmp/synapse-build
 # entering this chroot. Do not assume a minimal root already includes Python.
 sha256sum --check SHA256SUMS
 export DEBIAN_FRONTEND=noninteractive
+state=$(mktemp -d /tmp/synapse-install.XXXXXXXX)
+trap 'rm -rf -- "$state"' EXIT
+# Everything installed before this script belongs to the Armbian base image.
+# The build-package cleanup at the end never removes any of it.
+dpkg-query -W -f='${Package}\n' | LC_ALL=C sort -u > "$state/base-packages"
 apt_options=()
 if [[ -n ${SSL_CERT_FILE:-} ]]; then
     apt_options=(-o "Acquire::https::CaInfo=$SSL_CERT_FILE")
@@ -23,11 +28,9 @@ for package in ca-certificates openssl curl git libssl3 libssl3t64 libgnutls30 l
 done
 apt-get "${apt_options[@]}" install --yes --only-upgrade --no-install-recommends "${tls_packages[@]}"
 # Keep Debian's default Python, board kernel, firmware, bootloader and network
-# configuration intact. Build a private CPython because NumPy 1.26 needs <3.13.
+# configuration intact. A private CPython is used because NumPy 1.26 needs <3.13.
 apt-get "${apt_options[@]}" install --yes --no-install-recommends \
-    python3 build-essential ca-certificates libssl-dev zlib1g-dev libbz2-dev \
-    libreadline-dev libsqlite3-dev libffi-dev liblzma-dev libncurses-dev \
-    uuid-dev xz-utils libgl1 libglib2.0-0 libatomic1 libstdc++6 \
+    python3 ca-certificates xz-utils libgl1 libglib2.0-0 libatomic1 libstdc++6 \
     openssh-server avahi-daemon v4l-utils unzip sudo iproute2 \
     device-tree-compiler gpiod python3-libgpiod netplan.io
 python3 /tmp/synapse-build/tls_policy.py debian
@@ -44,27 +47,33 @@ elif [[ $board == orangepi5 ]]; then
     # Armbian vendor kernels otherwise force the USB-C controller into host mode.
     systemctl mask orangepi5-usb2-init.service
 fi
+mapfile -t build_packages < <(grep -Ev '^[[:space:]]*(#|$)' cpython-build-packages.txt)
 if [[ -f synapse-python.tar.xz ]]; then
-    # Prebuilt interpreter from build-python.sh (shared by all trixie arm64
-    # targets); skips the in-image compile and the toolchain install below.
-    mkdir -p /opt/synapse-python
+    # Prebuilt by build-python.sh from the same pinned source, so no compiler is
+    # installed. Refuse it unless it targets this Debian release and architecture.
+    install -d -m 0755 /opt/synapse-python
     tar -xJf synapse-python.tar.xz -C /opt/synapse-python --strip-components=1
+    built_for=$(paste -sd ' ' /opt/synapse-python/.synapse-build-os)
+    # shellcheck source=/dev/null
+    this_image=$(. /etc/os-release && printf '%s %s %s' "$ID" "$VERSION_CODENAME" "$(dpkg --print-architecture)")
+    [[ $built_for == "$this_image" ]] || {
+        echo "Prebuilt CPython was built for '$built_for' but this image is '$this_image'." >&2
+        echo 'Rebuild it with build-python.sh for this board, or omit --python-tarball.' >&2
+        exit 1
+    }
 else
-    source_dir=$(mktemp -d /tmp/synapse-python.XXXXXXXX)
-    trap 'rm -rf -- "$source_dir"' EXIT
-    tar -xzf cpython.tar.gz -C "$source_dir" --strip-components=1
-    (
-        cd "$source_dir"
-        ./configure --prefix=/opt/synapse-python --with-ensurepip=install --disable-test-modules
-        make -j"$(nproc)"
-        make altinstall
-        # Trim dead weight: the static libpython and unstripped binaries.
-        rm -f /opt/synapse-python/lib/python3.12/config-*/libpython3.12.a
-        find /opt/synapse-python -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
-        strip --strip-unneeded /opt/synapse-python/bin/python3.12 2>/dev/null || true
-    )
+    apt-get "${apt_options[@]}" install --yes --no-install-recommends "${build_packages[@]}"
+    bash /tmp/synapse-build/build_cpython.sh cpython.tar.gz /tmp/synapse-build/runtime_libraries.py
 fi
-/opt/synapse-python/bin/python3.12 -c 'import ssl, sqlite3, bz2, lzma, ctypes, readline, venv'
+# Install, and mark as explicitly installed, every Debian library the
+# interpreter links against so the cleanup below can never remove one.
+mapfile -t python_runtime < /opt/synapse-python/.synapse-runtime-packages
+for package in "${python_runtime[@]}"; do
+    [[ $package =~ ^[a-z0-9][a-z0-9+.-]+$ ]] || { echo "Invalid runtime package name: $package" >&2; exit 1; }
+done
+apt-get "${apt_options[@]}" install --yes --no-install-recommends "${python_runtime[@]}"
+python3 /tmp/synapse-build/runtime_libraries.py check /opt/synapse-python
+/opt/synapse-python/bin/python3.12 -c 'import ssl, sqlite3, bz2, lzma, zlib, ctypes, readline, venv'
 id synapse >/dev/null 2>&1 || useradd --create-home --shell /bin/bash synapse
 # No shared image password. Retain Armbian's first-login credential setup.
 usermod -aG video synapse
@@ -77,10 +86,10 @@ done
 python3 /tmp/synapse-build/tls_policy.py bootstrap --python /home/synapse/.venv/bin/python
 wheel=$(python3 -c 'import json; print(json.load(open("image-metadata.json"))["wheel"]["filename"])')
 # Binary-only dependencies fail early if RobotPy/OpenCV stop supporting ARM64.
-# Prefer the pre-downloaded wheelhouse (offline); fall back to the official
-# PyPI index. OS Python is never modified.
-pip_args=(--isolated --only-binary=:all:)
-if [[ -d wheelhouse && -n $(ls -A wheelhouse 2>/dev/null) ]]; then
+# Use the hash-checked wheelhouse (offline) when one was supplied, otherwise the
+# official PyPI index. OS Python is never modified.
+pip_args=(--isolated install --only-binary=:all:)
+if compgen -G 'wheelhouse/*.whl' >/dev/null; then
     pip_args+=(--no-index --find-links=/tmp/synapse-build/wheelhouse)
 else
     pip_args+=(--index-url https://pypi.org/simple)
@@ -88,18 +97,12 @@ fi
 /home/synapse/.venv/bin/python -m pip "${pip_args[@]}" \
     --requirement hardware-requirements.txt "$wheel"
 /home/synapse/.venv/bin/python -m pip check
-# The device never runs the simulator viewer; drop its large 3D assets.
-rm -rf /home/synapse/.venv/lib/python3.12/site-packages/synapse_sim/assets/*.glb \
-       /home/synapse/.venv/lib/python3.12/site-packages/synapse_sim/assets/apriltags
 python3 /tmp/synapse-build/prepare_project.py synapse /home/synapse/Synapse
 install -o synapse -g synapse -m 0644 main.py /home/synapse/Synapse/main.py
 install -o synapse -g synapse -m 0644 settings.yml /home/synapse/Synapse/config/settings.yml
 chown -R synapse:synapse /home/synapse/.venv
 install -d /usr/share/synapse-image
 cp image-metadata.json /usr/share/synapse-image/
-/home/synapse/.venv/bin/python /tmp/synapse-build/tls_policy.py audit --system > /usr/share/synapse-image/tls-audit.json
-/home/synapse/.venv/bin/python -m pip freeze --all > /usr/share/synapse-image/python-requirements.txt
-dpkg-query -W > /usr/share/synapse-image/debian-packages.txt
 install -m 0644 synapse-runtime.service synapse-firstboot.service synapse-usb-ethernet.service /etc/systemd/system/
 install -m 0755 synapse-firstboot synapse-usb-ethernet synapse-pwm-permissions /usr/local/sbin/
 install -D -m 0644 60-synapse-io.rules /etc/udev/rules.d/60-synapse-io.rules
@@ -107,6 +110,12 @@ systemctl enable synapse-runtime.service synapse-firstboot.service ssh.service a
 systemctl enable systemd-networkd.service synapse-usb-ethernet.service
 install -d /etc/systemd/journald.conf.d
 printf '[Journal]\nSystemMaxUse=100M\nRuntimeMaxUse=50M\n' > /etc/systemd/journald.conf.d/60-synapse.conf
+# Every network link is optional (netplan `optional: true`), so a boot without
+# an Ethernet cable or DHCP server must not hold network-online.target, and the
+# Synapse runtime ordered after it, for wait-online's default 2-minute timeout.
+install -d /etc/systemd/system/systemd-networkd-wait-online.service.d
+printf '[Service]\nExecStart=\nExecStart=/usr/lib/systemd/systemd-networkd-wait-online --timeout=20\n' \
+    > /etc/systemd/system/systemd-networkd-wait-online.service.d/60-synapse.conf
 # The existing runtime uses sudo for these explicit appliance operations.
 # SSH users still need the Armbian administrator for general administration.
 cat > /etc/sudoers.d/synapse-runtime <<'EOF'
@@ -119,10 +128,41 @@ rm -f /etc/ssh/ssh_host_* /var/lib/dbus/machine-id
 truncate -s 0 /etc/machine-id
 ln -s /etc/machine-id /var/lib/dbus/machine-id
 rm -f /var/lib/synapse/identity-initialized
-# The image runtime only needs the shared libraries, not the C toolchain used
-# to build CPython. Purging -dev packages keeps their runtime libraries.
-apt-get purge --yes build-essential libc6-dev dpkg-dev \
-    libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
-    libffi-dev liblzma-dev libncurses-dev uuid-dev
+
+# Remove the compiler toolchain: only packages this script added for the
+# CPython build, then the dependencies that leaves orphaned. Never touch the
+# Armbian base, anything installed explicitly above, or any Debian library that
+# the interpreter or Synapse's Python packages (OpenCV, RobotPy, NumPy, napa,
+# ...) load. Those are marked manually installed first.
+mapfile -t linked < <(python3 /tmp/synapse-build/runtime_libraries.py packages /opt/synapse-python /home/synapse/.venv)
+if (( ${#linked[@]} )); then
+    apt-mark manual "${linked[@]}" >/dev/null
+fi
+added_packages() {
+    dpkg-query -W -f='${Package}\n' | LC_ALL=C sort -u | LC_ALL=C comm -23 - "$state/base-packages"
+}
+purge_added() {
+    (( $# )) || return 0
+    local planned unexpected
+    planned=$(apt-get -s purge "$@" | awk '/^(Purg|Remv) / {print $2}' | sed 's/:.*//' | LC_ALL=C sort -u)
+    unexpected=$(LC_ALL=C comm -23 <(printf '%s\n' "$planned") <(printf '%s\n' "$@" | LC_ALL=C sort -u) | sed '/^$/d')
+    [[ -z $unexpected ]] || {
+        echo "Refusing build cleanup that would also remove: $unexpected" >&2
+        exit 1
+    }
+    apt-get purge --yes "$@"
+}
+mapfile -t added_build < <(LC_ALL=C comm -12 <(printf '%s\n' "${build_packages[@]}" | LC_ALL=C sort -u) <(added_packages))
+purge_added "${added_build[@]}"
+mapfile -t orphans < <(LC_ALL=C comm -12 \
+    <(apt-get -s autoremove | awk '/^Remv / {print $2}' | sed 's/:.*//' | LC_ALL=C sort -u) \
+    <(added_packages))
+purge_added "${orphans[@]}"
+python3 /tmp/synapse-build/runtime_libraries.py check /opt/synapse-python
+
+# Record the final state, after cleanup, so the inventories match the image.
+/home/synapse/.venv/bin/python /tmp/synapse-build/tls_policy.py audit --system > /usr/share/synapse-image/tls-audit.json
+/home/synapse/.venv/bin/python -m pip freeze --all > /usr/share/synapse-image/python-requirements.txt
+dpkg-query -W > /usr/share/synapse-image/debian-packages.txt
 apt-get clean
 rm -rf /var/lib/apt/lists/* /root/.cache/pip

@@ -30,12 +30,14 @@ Run **Synapse Linux images** with `workflow_dispatch`, selecting one board or
 `all`.
 Pushes changing the builder on `main` or `codex/synapse-image-builder` also build
 four artifacts covering the board families above. Pull requests run checks without privileged image builds.
-The workflow builds the current checkout's Python wheel, static UI and the
-shared CPython 3.12 interpreter once (all targets are Debian trixie arm64, so
-one build is reused), pre-downloads the ARM64 wheels into a wheelhouse, and
-then modifies each distinct board image on a native ARM64 Ubuntu runner in
-parallel. Base images are restored from a cache keyed by their verified
-official URL; SHA256 and signature checks still run on every use.
+The workflow builds the current checkout's Python wheel and static UI once,
+downloads the ARM64 wheels into a wheelhouse on a native ARM64 runner, and
+builds the private CPython 3.12 once (cached until its source, build scripts or
+Debian release change). It then modifies each distinct board image in parallel
+on native ARM64 Ubuntu runners. Every board currently resolves to Debian trixie
+arm64, so one interpreter is shared; an image refuses it if its Debian release
+or architecture differs. Base images are cached by their official URL, and
+their SHA256 and signature are still checked on every use.
 Pi 4, Pi 5, CM4 and CM5 share the generically named `raspberrypi` artifact.
 Armbian still identifies its shared base as `rpi4b`. The builder checks for all
 four models' firmware trees; carrier-specific boot and camera validation remain necessary. It uploads
@@ -96,10 +98,18 @@ system Python is preserved. A checksum-pinned official CPython 3.12 release is
 installed into `/opt/synapse-python` because the runtime's NumPy 1.26.4 pin
 does not support Trixie's default Python 3.13. CI builds it once with
 `build-python.sh` and unpacks the tarball into every image; a local build
-without `--python-tarball` compiles it inside the image instead (using every
-core, with test modules, the static libpython and unstripped binaries trimmed
-in both paths). Update `sources.json` when qualifying a newer Python 3.12
-security release.
+without `--python-tarball` compiles it inside the image instead. Both paths use
+`payload/build_cpython.sh`, which omits the test suite, the static libpython,
+debug symbols and -O bytecode. The C toolchain is never installed for a prebuilt
+interpreter. After a local compile, only the packages the build added are purged:
+the Armbian base, explicitly installed packages and every Debian library that
+the interpreter or the Python packages link against are kept, and a cleanup that
+would remove anything else stops the build. Update `sources.json` when
+qualifying a newer Python 3.12 security release.
+
+Every network link is optional, so `systemd-networkd-wait-online` is capped at
+20 seconds: a boot without Ethernet or DHCP no longer delays the runtime by the
+default two minutes.
 
 The application runs as `synapse`, with project files in
 `/home/synapse/Synapse` and a virtual environment at `/home/synapse/.venv`.
@@ -135,9 +145,10 @@ UUID/PARTUUID references and first-boot filesystem expansion. It grows the final
 root partition during the build for compile/install headroom, then shrinks only
 that last partition back to its content plus a 256 MiB margin before compressing
 (partition starts and UUIDs never move, so 8 GB SD cards/eMMC suffice and
-flashing stays fast; Armbian's first boot still expands to the full card). Free
-blocks are discarded with `fstrim` before compression so deleted build files do
-not bloat the image. It does not flash
+flashing stays fast; Armbian's first boot still expands to the full card). MBR
+tables stay MBR; only GPT images have their backup header moved. After the
+shrink, free blocks are discarded with `fstrim` so deleted build files do not
+bloat the compressed image. It does not flash
 SPI, alter EEPROM/UEFI firmware, apply PhotonVision-specific optimizations, force
 CPU affinity or install NPU SDKs. Board-specific UART/PWM provisioning frees the
 Raspberry Pi Bluetooth UART and analogue-audio PWM resources; see the hardware notes.
@@ -170,9 +181,11 @@ modified image merely by supplying a matching checksum: the signature is also
 required. This authenticates the base against Armbian's pinned key, not the
 modified Synapse output or the security of every upstream component.
 
-The wheel and CPython archive are checked again in the target root. Debian apt
-retains its signed repository verification, and Python packages use official
-PyPI with TLS verification and binary-only dependencies.
+The wheel, the CPython archive and every wheelhouse wheel are checked again in
+the target root against hashes recorded in the provenance. Debian apt retains
+its signed repository verification. Python packages are binary-only and come
+from official PyPI with TLS verification, either directly or through the
+wheelhouse downloaded from it.
 
 Each output has a checksum and provenance JSON recording the selected base URL,
 Armbian/kernel release, base hash, signature URL/hash and signer fingerprints,
