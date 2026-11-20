@@ -13,8 +13,7 @@ assert (Path(spec.origin).parent / 'dashboard.html').is_file(), 'Web UI not buil
 assert cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11).bytesList.size
 print('Synapse, native ARM64 vision dependencies, and packaged UI validated')
 PY
-/home/synapse/.venv/bin/python -m pip check
-/home/synapse/.venv/bin/python /tmp/synapse-build/tls_policy.py audit --system
+# pip check and the TLS audit already ran at the end of install.sh.
 python3 /tmp/synapse-build/hardware.py validate
 netplan generate
 /home/synapse/.venv/bin/python /tmp/synapse-build/smoke.py

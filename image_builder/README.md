@@ -30,8 +30,12 @@ Run **Synapse Linux images** with `workflow_dispatch`, selecting one board or
 `all`.
 Pushes changing the builder on `main` or `codex/synapse-image-builder` also build
 four artifacts covering the board families above. Pull requests run checks without privileged image builds.
-The workflow builds the current checkout's Python wheel and static UI once,
-then modifies each distinct board image on a native ARM64 Ubuntu runner.
+The workflow builds the current checkout's Python wheel, static UI and the
+shared CPython 3.12 interpreter once (all targets are Debian trixie arm64, so
+one build is reused), pre-downloads the ARM64 wheels into a wheelhouse, and
+then modifies each distinct board image on a native ARM64 Ubuntu runner in
+parallel. Base images are restored from a cache keyed by their verified
+official URL; SHA256 and signature checks still run on every use.
 Pi 4, Pi 5, CM4 and CM5 share the generically named `raspberrypi` artifact.
 Armbian still identifies its shared base as `rpi4b`. The builder checks for all
 four models' firmware trees; carrier-specific boot and camera validation remain necessary. It uploads
@@ -62,9 +66,17 @@ SYNAPSE_BUILD_PYTHON="$PWD/.venv/bin/python" bash image_builder/build-wheel.sh
 python3 -m image_builder.build resolve --board orangepi5-plus
 
 # Supply the exact wheel filename produced above. Use a fresh work directory.
+# --python-tarball and --wheelhouse are optional; without them the image
+# compiles CPython itself and pip downloads from PyPI inside the chroot.
 python3 -m image_builder.build build --board orangepi5-plus \
   --wheel dist/image-builder/synapsefrc-2027.0.0a1-py3-none-any.whl \
+  --python-tarball dist/synapse-python.tar.xz \
+  --wheelhouse dist/wheelhouse \
   --work-dir /var/tmp/synapse-orangepi5-plus --output-dir dist/images
+
+# Build the shared CPython once yourself (used by --python-tarball):
+sudo bash image_builder/build-python.sh --board raspberrypi \
+  --work-dir /var/tmp/synapse-python-build --output dist/synapse-python.tar.xz
 ```
 
 Stop any Next.js development server before building the wheel. The UI build
@@ -80,10 +92,14 @@ reports the loop device for recovery rather than deleting a mounted tree.
 The image installs the current checkout's wheel, its static UI, native RobotPy
 and OpenCV dependencies, SSH, mDNS and the `synapse-runtime.service` service.
 No network downloads are required to start Synapse on first boot. Debian's
-system Python is preserved. A checksum-pinned official CPython 3.12 source
-release is built into `/opt/synapse-python` because the runtime's NumPy 1.26.4
-pin does not support Trixie's default Python 3.13. Update `sources.json` when
-qualifying a newer Python 3.12 security release.
+system Python is preserved. A checksum-pinned official CPython 3.12 release is
+installed into `/opt/synapse-python` because the runtime's NumPy 1.26.4 pin
+does not support Trixie's default Python 3.13. CI builds it once with
+`build-python.sh` and unpacks the tarball into every image; a local build
+without `--python-tarball` compiles it inside the image instead (using every
+core, with test modules, the static libpython and unstripped binaries trimmed
+in both paths). Update `sources.json` when qualifying a newer Python 3.12
+security release.
 
 The application runs as `synapse`, with project files in
 `/home/synapse/Synapse` and a virtual environment at `/home/synapse/.venv`.
@@ -116,7 +132,12 @@ sudo systemctl restart synapse-runtime.service
 
 The builder retains Armbian's kernel, device trees, firmware, boot partitions,
 UUID/PARTUUID references and first-boot filesystem expansion. It grows the final
-root partition without shrinking or moving boot partitions. It does not flash
+root partition during the build for compile/install headroom, then shrinks only
+that last partition back to its content plus a 256 MiB margin before compressing
+(partition starts and UUIDs never move, so 8 GB SD cards/eMMC suffice and
+flashing stays fast; Armbian's first boot still expands to the full card). Free
+blocks are discarded with `fstrim` before compression so deleted build files do
+not bloat the image. It does not flash
 SPI, alter EEPROM/UEFI firmware, apply PhotonVision-specific optimizations, force
 CPU affinity or install NPU SDKs. Board-specific UART/PWM provisioning frees the
 Raspberry Pi Bluetooth UART and analogue-audio PWM resources; see the hardware notes.

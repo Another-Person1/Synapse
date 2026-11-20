@@ -311,7 +311,14 @@ def wheel_details(wheel: Path) -> dict:
     }
 
 
-def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dict]:
+def prepare(
+    board: str,
+    index: dict,
+    wheel: Path,
+    work: Path,
+    python_tarball: Path | None = None,
+    wheelhouse: Path | None = None,
+) -> tuple[Path, dict]:
     asset = select_image(index, board)
     wheel_info = wheel_details(wheel)
     url = asset["file_url"]
@@ -335,8 +342,6 @@ def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dic
     with open_armbian(signature_url) as response:
         signature.write_bytes(response.read(1024 * 1024))
     signers = verify_signature(base, signature)
-    python_source = cache / f"cpython-{SOURCES['python_version']}.tar.gz"
-    download(SOURCES["python_url"], python_source, SOURCES["python_sha256"])
     payload = work / "payload"
     if payload.exists():
         raise BuildError(
@@ -346,7 +351,28 @@ def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dic
         HERE / "payload", payload, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
     )
     shutil.copy2(wheel, payload / wheel.name)
-    shutil.copy2(python_source, payload / "cpython.tar.gz")
+    prebuilt_python = None
+    if python_tarball is not None:
+        if not python_tarball.is_file():
+            raise BuildError(f"Prebuilt Python tarball not found: {python_tarball}")
+        shutil.copy2(python_tarball, payload / "synapse-python.tar.xz")
+        prebuilt_python = {
+            "filename": "synapse-python.tar.xz",
+            "sha256": sha256(python_tarball),
+            "version": SOURCES["python_version"],
+            "commit": SOURCES["python_commit"],
+        }
+    else:
+        python_source = cache / f"cpython-{SOURCES['python_version']}.tar.gz"
+        download(SOURCES["python_url"], python_source, SOURCES["python_sha256"])
+        shutil.copy2(python_source, payload / "cpython.tar.gz")
+    if wheelhouse is not None:
+        if not wheelhouse.is_dir():
+            raise BuildError(f"Wheelhouse directory not found: {wheelhouse}")
+        destination = payload / "wheelhouse"
+        shutil.copytree(wheelhouse, destination)
+        if not any(destination.iterdir()):
+            raise BuildError(f"Wheelhouse is empty: {wheelhouse}")
     metadata = {
         "schema_version": 1,
         "built_at": datetime.now(timezone.utc).isoformat(),
@@ -382,6 +408,7 @@ def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dic
                 "python_sha256",
             )
         },
+        "prebuilt_python": prebuilt_python,
         "builder_commit": subprocess.check_output(
             ["git", "-C", str(HERE), "rev-parse", "HEAD"], text=True
         ).strip(),
@@ -392,10 +419,12 @@ def prepare(board: str, index: dict, wheel: Path, work: Path) -> tuple[Path, dic
         ),
     }
     (payload / "image-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    (payload / "SHA256SUMS").write_text(
-        f"{wheel_info['sha256']}  {wheel.name}\n"
-        f"{SOURCES['python_sha256']}  cpython.tar.gz\n"
-    )
+    sums = [f"{wheel_info['sha256']}  {wheel.name}\n"]
+    if prebuilt_python is not None:
+        sums.append(f"{prebuilt_python['sha256']}  synapse-python.tar.xz\n")
+    else:
+        sums.append(f"{SOURCES['python_sha256']}  cpython.tar.gz\n")
+    (payload / "SHA256SUMS").write_text("".join(sums))
     return base, metadata
 
 
@@ -409,6 +438,16 @@ def main(argv=None) -> int:
         help="Previously captured official inventory (offline inspection)",
     )
     parser.add_argument("--wheel", type=Path)
+    parser.add_argument(
+        "--python-tarball",
+        type=Path,
+        help="Prebuilt CPython aarch64 tarball from build-python.sh; skips the in-image compile",
+    )
+    parser.add_argument(
+        "--wheelhouse",
+        type=Path,
+        help="Directory of pre-downloaded wheels for an offline chroot pip install",
+    )
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--output-dir", type=Path, default=Path("dist/images"))
     args = parser.parse_args(argv)
@@ -442,7 +481,16 @@ def main(argv=None) -> int:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise BuildError(f"Another builder is using {work}") from None
-            base, metadata = prepare(args.board, index, args.wheel.resolve(), work)
+            base, metadata = prepare(
+                args.board,
+                index,
+                args.wheel.resolve(),
+                work,
+                python_tarball=args.python_tarball.resolve()
+                if args.python_tarball
+                else None,
+                wheelhouse=args.wheelhouse.resolve() if args.wheelhouse else None,
+            )
             output = args.output_dir.resolve()
             output.mkdir(parents=True, exist_ok=True)
             filename = f"synapse-{metadata['wheel']['version']}-{metadata['image_target']}-armbian-{metadata['base']['armbian_version']}.img.xz"

@@ -44,15 +44,26 @@ elif [[ $board == orangepi5 ]]; then
     # Armbian vendor kernels otherwise force the USB-C controller into host mode.
     systemctl mask orangepi5-usb2-init.service
 fi
-source_dir=$(mktemp -d /tmp/synapse-python.XXXXXXXX)
-trap 'rm -rf -- "$source_dir"' EXIT
-tar -xzf cpython.tar.gz -C "$source_dir" --strip-components=1
-(
-    cd "$source_dir"
-    ./configure --prefix=/opt/synapse-python --with-ensurepip=install
-    make -j2
-    make altinstall
-)
+if [[ -f synapse-python.tar.xz ]]; then
+    # Prebuilt interpreter from build-python.sh (shared by all trixie arm64
+    # targets); skips the in-image compile and the toolchain install below.
+    mkdir -p /opt/synapse-python
+    tar -xJf synapse-python.tar.xz -C /opt/synapse-python --strip-components=1
+else
+    source_dir=$(mktemp -d /tmp/synapse-python.XXXXXXXX)
+    trap 'rm -rf -- "$source_dir"' EXIT
+    tar -xzf cpython.tar.gz -C "$source_dir" --strip-components=1
+    (
+        cd "$source_dir"
+        ./configure --prefix=/opt/synapse-python --with-ensurepip=install --disable-test-modules
+        make -j"$(nproc)"
+        make altinstall
+        # Trim dead weight: the static libpython and unstripped binaries.
+        rm -f /opt/synapse-python/lib/python3.12/config-*/libpython3.12.a
+        find /opt/synapse-python -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
+        strip --strip-unneeded /opt/synapse-python/bin/python3.12 2>/dev/null || true
+    )
+fi
 /opt/synapse-python/bin/python3.12 -c 'import ssl, sqlite3, bz2, lzma, ctypes, readline, venv'
 id synapse >/dev/null 2>&1 || useradd --create-home --shell /bin/bash synapse
 # No shared image password. Retain Armbian's first-login credential setup.
@@ -66,10 +77,20 @@ done
 python3 /tmp/synapse-build/tls_policy.py bootstrap --python /home/synapse/.venv/bin/python
 wheel=$(python3 -c 'import json; print(json.load(open("image-metadata.json"))["wheel"]["filename"])')
 # Binary-only dependencies fail early if RobotPy/OpenCV stop supporting ARM64.
-# Packages come from the official PyPI index; OS Python is never modified.
-/home/synapse/.venv/bin/python -m pip --isolated install \
-    --index-url https://pypi.org/simple --only-binary=:all: --requirement hardware-requirements.txt "$wheel"
+# Prefer the pre-downloaded wheelhouse (offline); fall back to the official
+# PyPI index. OS Python is never modified.
+pip_args=(--isolated --only-binary=:all:)
+if [[ -d wheelhouse && -n $(ls -A wheelhouse 2>/dev/null) ]]; then
+    pip_args+=(--no-index --find-links=/tmp/synapse-build/wheelhouse)
+else
+    pip_args+=(--index-url https://pypi.org/simple)
+fi
+/home/synapse/.venv/bin/python -m pip "${pip_args[@]}" \
+    --requirement hardware-requirements.txt "$wheel"
 /home/synapse/.venv/bin/python -m pip check
+# The device never runs the simulator viewer; drop its large 3D assets.
+rm -rf /home/synapse/.venv/lib/python3.12/site-packages/synapse_sim/assets/*.glb \
+       /home/synapse/.venv/lib/python3.12/site-packages/synapse_sim/assets/apriltags
 python3 /tmp/synapse-build/prepare_project.py synapse /home/synapse/Synapse
 install -o synapse -g synapse -m 0644 main.py /home/synapse/Synapse/main.py
 install -o synapse -g synapse -m 0644 settings.yml /home/synapse/Synapse/config/settings.yml
@@ -98,5 +119,10 @@ rm -f /etc/ssh/ssh_host_* /var/lib/dbus/machine-id
 truncate -s 0 /etc/machine-id
 ln -s /etc/machine-id /var/lib/dbus/machine-id
 rm -f /var/lib/synapse/identity-initialized
+# The image runtime only needs the shared libraries, not the C toolchain used
+# to build CPython. Purging -dev packages keeps their runtime libraries.
+apt-get purge --yes build-essential libc6-dev dpkg-dev \
+    libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+    libffi-dev liblzma-dev libncurses-dev uuid-dev
 apt-get clean
 rm -rf /var/lib/apt/lists/* /root/.cache/pip

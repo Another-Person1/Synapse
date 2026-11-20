@@ -90,7 +90,6 @@ jobs:
 
   wheel:
     if: github.event_name != 'pull_request'
-    needs: test
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -129,14 +128,76 @@ jobs:
           name: synapse-image-wheel
           path: dist/image-builder/*.whl
           if-no-files-found: error
+      - name: Pre-download ARM64 wheels for offline image installs
+        run: |
+          python -m pip download --dest dist/wheelhouse \
+            --platform manylinux2014_aarch64 --platform linux_aarch64 \
+            --python-version 3.12 --implementation cp --abi cp312 \
+            --only-binary=:all: \
+            -r image_builder/payload/hardware-requirements.txt dist/image-builder/*.whl
+      - uses: actions/upload-artifact@v7
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          name: synapse-wheelhouse
+          path: dist/wheelhouse
+          if-no-files-found: error
+
+  cpython:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prepare audited TLS trust
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
+
+      - uses: actions/setup-python@v6
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          check-latest: true
+          python-version: '3.12'
+      - name: Update and audit Python TLS tooling
+        working-directory: ${{ github.workspace }}
+        run: |
+          python image_builder/payload/tls_policy.py bootstrap
+          python image_builder/payload/tls_policy.py audit
+
+      - uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/synapse-python-build/downloads
+          key: synapse-cpython-${{ hashFiles('image_builder/sources.json') }}
+          restore-keys: synapse-cpython-
+      - name: Install host disk tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            parted gdisk e2fsprogs util-linux udev xz-utils
+      # Every image target is Debian trixie arm64, so one build is shared by
+      # all boards; payload/install.sh unpacks it instead of compiling.
+      - name: Build shared CPython once
+        run: |
+          sudo -E bash image_builder/build-python.sh --board raspberrypi \
+            --work-dir "$RUNNER_TEMP/synapse-python-build" \
+            --output dist/synapse-python.tar.xz
+      - uses: actions/upload-artifact@v7
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          name: synapse-python
+          path: dist/synapse-python.tar.xz
+          if-no-files-found: error
 
   image:
-    needs: [test, matrix, wheel]
+    needs: [test, matrix, wheel, cpython]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 4
       matrix:
         board: ${{ fromJSON(needs.matrix.outputs.boards) }}
     steps:
@@ -152,6 +213,32 @@ jobs:
         with:
           name: synapse-image-wheel
           path: dist/image-builder
+      - uses: actions/download-artifact@v8
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          name: synapse-python
+          path: dist
+      - uses: actions/download-artifact@v8
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          name: synapse-wheelhouse
+          path: dist/wheelhouse
+      - name: Resolve selected base image cache key
+        id: basekey
+        env:
+          BOARD: ${{ matrix.board }}
+        run: |
+          key=$(python3 -c 'import hashlib, json, os, subprocess; a = json.loads(subprocess.check_output(["python3", "-m", "image_builder.build", "resolve", "--board", os.environ["BOARD"]])); print(hashlib.sha256(a["file_url"].encode()).hexdigest())')
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      # The builder re-verifies SHA256 and the Armbian signature on every use,
+      # so a cached download keyed by the official URL hash stays safe.
+      - uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/synapse-image/downloads
+          key: synapse-base-${{ steps.basekey.outputs.key }}
+          restore-keys: synapse-base-
       - name: Install host disk tools
         run: |
           sudo apt-get update
@@ -165,6 +252,8 @@ jobs:
           test "${#wheels[@]}" -eq 1
           python3 -m image_builder.build build --board "$BOARD" \
             --wheel "${wheels[0]}" --work-dir "$RUNNER_TEMP/synapse-image" \
+            --python-tarball dist/synapse-python.tar.xz \
+            --wheelhouse dist/wheelhouse \
             --output-dir dist/images
       - uses: actions/upload-artifact@v7
         env:

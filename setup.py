@@ -82,7 +82,8 @@ setup(
         wpilibDep("robotpy_wpiutil"),
         wpilibDep("wpilib"),
         wpilibDep("pyntcore"),
-        visionProcessingDep("opencv_python==4.8.0.74"),
+        # opencv_contrib_python is a superset of opencv_python (same cv2
+        # package, plus contrib modules such as cv2.aruco); install only it.
         visionProcessingDep("opencv_contrib_python==4.8.0.74"),
         visionProcessingDep("napa-vision==0.5.1"),
         deviceAccessDep("PyYAML"),
@@ -94,7 +95,9 @@ setup(
         synapseInstallerDep("toml"),
         hardwareManagementDep("psutil"),
         synapseNetDep("protobuf"),
-        synapseNetDep("betterproto[compiler]==2.0.0b7"),
+        # Runtime needs only the base package; the [compiler] extra
+        # (grpcio-tools) is for code generation and lives in the dev extra.
+        synapseNetDep("betterproto==2.0.0b7"),
         synapseNetDep("websockets"),
     ],
     extras_require={
@@ -105,6 +108,7 @@ setup(
         "dev": [
             "wheel",
             "setuptools",
+            "betterproto[compiler]==2.0.0b7",
             "pytest",
             "pytest-asyncio",
             "pytest-mock",
