@@ -11,17 +11,74 @@ HERE = Path(__file__).resolve().parent
 ROCKCHIP = {
     "orangepi5": {
         "dtb": "rockchip/rk3588s-orangepi-5.dtb",
+        "compatible": ["xunlong,orangepi-5", "rockchip,rk3588s-orangepi-5"],
         "overlays": ["rk3588-spi4-m0-cs1-spidev", "rk3588-uart0-m2", "rk3588-pwm1-m1"],
+        "symbols": ("spi4", "uart0", "pwm1"),
         "spi_pins": [19, 21, 23, 24],
         "uart_pins": [8, 10],
         "pwm_pins": [16],
     },
     "orangepi5-plus": {
         "dtb": "rockchip/rk3588-orangepi-5-plus.dtb",
+        "compatible": ["xunlong,orangepi-5-plus", "rockchip,rk3588-orangepi-5-plus"],
         "overlays": ["rk3588-spi0-m2-cs0-spidev", "rk3588-uart6-m1", "rk3588-pwm14-m0"],
+        "symbols": ("spi0", "uart6", "pwm14"),
         "spi_pins": [19, 21, 23, 24],
         "uart_pins": [8, 10],
         "pwm_pins": [33],
+    },
+    "rock-5b": {
+        "dtb": "rockchip/rk3588-rock-5b.dtb",
+        "compatible": ["radxa,rock-5b", "rockchip,rk3588"],
+        "overlays": [
+            "rk3588-spi0-m2-cs0-cs1-spidev",
+            "rk3588-uart2-m0",
+            "rk3588-pwm14-m0",
+        ],
+        "symbols": ("spi0", "uart2", "pwm14"),
+        # ttyFIQ0 (header pins 8/10) belongs to applications, so the kernel
+        # console stays on the display and no login shell uses the header UART.
+        "armbian_env": {"console": "display"},
+        "spi_pins": [19, 21, 23, 24, 26],
+        "uart_pins": [8, 10],
+        "pwm_pins": [32],
+    },
+}
+# Qualcomm boards boot through GRUB with a per-kernel device tree file; a
+# compiled overlay is merged into every /boot/armbian-dtb-* tree.
+QCOM = {
+    "radxa-dragon-q6a": {
+        "compatible": "radxa,dragon-q6a",
+        "spi_path": "/soc@0/geniqup@ac0000/spi@a90000",
+        "overlay": "synapse-q6a-spi.dts",
+        "console": "ttyMSM0",
+        "spi_pins": [19, 21, 23, 24],
+        "uart_pins": [8, 10],
+        "pwm_pins": [5],
+    },
+    "radxa-dragon-q8b": {
+        "compatible": "radxa,dragon-q8b",
+        # SPI20 (GPIO87-90) on header pins 19/21/23/24, CS0 only.
+        "spi_path": "/soc@0/geniqup@8c0000/spi@890000",
+        "overlay": "synapse-q8b-spi.dts",
+        "console": "ttyMSM0",
+        "spi_pins": [19, 21, 23, 24],
+        "uart_pins": [8, 10],
+        "pwm_pins": [5],
+    },
+}
+# Allwinner boards apply overlays listed in armbianEnv.txt at boot; SPI1 is
+# already enabled with spidev in the base tree, so only UART/PWM need overlays.
+ALLWINNER = {
+    "cubie-a7z": {
+        "dtb": "allwinner/sun60i-a733-cubie-a7z.dtb",
+        "compatible": ["allwinner,a733", "arm,sun60iw2p1"],
+        "overlay_dir": "dtb/allwinner/overlay",
+        "overlays": ["sun60i-a733-uart2", "sun60i-a733-pwm0"],
+        "symbols": ("spi1", "uart2", "pwm0_0"),
+        "spi_pins": [19, 21, 23, 24],
+        "uart_pins": [7, 11],
+        "pwm_pins": [36],
     },
 }
 PI_DTBS = {
@@ -80,7 +137,7 @@ def compatible(dtb, expected):
         raise ValueError(f"Unexpected device tree for {expected}: {dtb}")
 
 
-def check_kernel(root, gadget=True, rp1=False):
+def check_kernel(root, gadget=True, rp1=False, require_pwm_gpio=False):
     configs = list((root / "boot").glob("config-*"))
     if not configs:
         raise ValueError("No auditable kernel configuration in the image")
@@ -95,8 +152,11 @@ def check_kernel(root, gadget=True, rp1=False):
         # still have the separate, optional CONFIG_PWM_SYSFS switch.
         if "# CONFIG_PWM_SYSFS is not set" in content:
             raise ValueError(f"PWM sysfs is disabled in {config.name}")
-        if not gadget and not re.search(r"^CONFIG_PWM_GPIO=[ym]$", content, re.M):
-            raise ValueError("Q6A requires the kernel GPIO PWM driver")
+        if require_pwm_gpio and not re.search(r"^CONFIG_PWM_GPIO=[ym]$", content, re.M):
+            raise ValueError(
+                "This board routes no hardware PWM to the header and requires "
+                "the kernel GPIO PWM driver"
+            )
         for option in required:
             if not re.search(rf"^{option}=[ym]$", content, re.M):
                 raise ValueError(f"Required {option} is unavailable in {config.name}")
@@ -205,24 +265,14 @@ def configure_rockchip(root, board):
     base = boot / "dtb" / profile["dtb"]
     if not base.is_file() or not all(p.is_file() for p in overlays):
         raise ValueError(f"{board}: expected official header overlays are unavailable")
-    compatible(
-        base,
-        ["xunlong,orangepi-5", "rockchip,rk3588s-orangepi-5"]
-        if board == "orangepi5"
-        else ["xunlong,orangepi-5-plus", "rockchip,rk3588-orangepi-5-plus"],
-    )
+    compatible(base, profile["compatible"])
     destination = boot / "overlay-user/synapse-usb-c.dtbo"
     compile_overlay(HERE / "overlays/synapse-rockchip-usb-c.dts", destination)
     # Test the complete combination against the board tree, not each alone.
     with tempfile.TemporaryDirectory() as temporary:
         combined = Path(temporary) / "combined.dtb"
         merge_overlay(base, overlays + [destination], combined)
-        symbols = (
-            ("spi4", "uart0", "pwm1")
-            if board == "orangepi5"
-            else ("spi0", "uart6", "pwm14")
-        )
-        for symbol in (*symbols, "usbdrd_dwc3_0"):
+        for symbol in (*profile["symbols"], "usbdrd_dwc3_0"):
             path = subprocess.check_output(
                 ["fdtget", "-t", "s", str(combined), "/__symbols__", symbol], text=True
             ).strip()
@@ -245,61 +295,108 @@ def configure_rockchip(root, board):
         old = re.search(rf"^{key}=(.*)$", text, re.M)
         existing = old.group(1).split() if old else []
         text = setting(text, key, " ".join(dict.fromkeys(existing + additions)))
+    for key, value in profile.get("armbian_env", {}).items():
+        text = setting(text, key, value)
     env.write_text(text)
     return {**profile, "pwm": "hardware", "usb_c_gadget": True}
 
 
-def configure_q6a_dtb(dtb, overlay):
-    compatible(dtb, "radxa,dragon-q6a")
+def overlay_name(board):
+    return QCOM[board]["overlay"].removesuffix(".dts") + ".dtbo"
+
+
+def configure_qcom_dtb(dtb, overlay, board):
+    profile = QCOM[board]
+    compatible(dtb, profile["compatible"])
     with tempfile.TemporaryDirectory(dir=dtb.parent) as temporary:
         merged = Path(temporary) / "merged.dtb"
         merge_overlay(dtb, [overlay], merged)
         # Generic SPI userspace binding is enabled by a narrowly scoped udev rule.
-        path = "/soc@0/geniqup@ac0000/spi@a90000"
         status = subprocess.check_output(
-            ["fdtget", "-t", "s", str(merged), path, "status"], text=True
+            ["fdtget", "-t", "s", str(merged), profile["spi_path"], "status"],
+            text=True,
         ).strip()
         if status != "okay":
-            raise ValueError("Q6A SPI12 was not enabled")
+            raise ValueError(f"{board}: header SPI was not enabled at {profile['spi_path']}")
         merged.chmod(dtb.stat().st_mode & 0o777)
         merged.replace(dtb)
 
 
-def configure_q6a(root):
-    overlay = root / "usr/share/synapse-image/synapse-q6a-spi.dtbo"
-    compile_overlay(HERE / "overlays/synapse-q6a-spi.dts", overlay)
+def configure_qcom(root, board):
+    profile = QCOM[board]
+    overlay = root / "usr/share/synapse-image" / overlay_name(board)
+    compile_overlay(HERE / "overlays" / profile["overlay"], overlay)
     trees = list((root / "boot").glob("armbian-dtb-*"))
     if not trees:
-        raise ValueError("Q6A GRUB device tree is unavailable")
+        raise ValueError(f"{board} GRUB device tree is unavailable")
     for dtb in trees:
-        configure_q6a_dtb(dtb, overlay)
+        configure_qcom_dtb(dtb, overlay, board)
+    console = profile["console"]
     # Free the header UART for applications, including after kernel upgrades.
     write(
         root,
         "etc/default/grub.d/99-synapse-uart.cfg",
-        """# Header UART belongs to applications, not a login console.
-GRUB_CMDLINE_LINUX_DEFAULT=$(printf '%s' "${GRUB_CMDLINE_LINUX_DEFAULT:-}" | sed -E 's/(^| )(console=ttyMSM0[^ ]*|earlycon[^ ]*)//g')
+        f"""# Header UART belongs to applications, not a login console.
+GRUB_CMDLINE_LINUX_DEFAULT=$(printf '%s' "${{GRUB_CMDLINE_LINUX_DEFAULT:-}}" | sed -E 's/(^| )(console={console}[^ ]*|earlycon[^ ]*)//g')
 GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT console=tty1"
-GRUB_CMDLINE_LINUX=$(printf '%s' "${GRUB_CMDLINE_LINUX:-}" | sed -E 's/(^| )(console=ttyMSM0[^ ]*|earlycon[^ ]*)//g')
+GRUB_CMDLINE_LINUX=$(printf '%s' "${{GRUB_CMDLINE_LINUX:-}}" | sed -E 's/(^| )(console={console}[^ ]*|earlycon[^ ]*)//g')
 """,
     )
+    subcommand = board.removeprefix("radxa-dragon-") + "-dtb"
     write(
         root,
-        "etc/kernel/postinst.d/zz-synapse-q6a-spi",
-        """#!/bin/sh
+        f"etc/kernel/postinst.d/zz-synapse-{board.removeprefix('radxa-dragon-')}-spi",
+        f"""#!/bin/sh
 set -eu
 dtb=/boot/armbian-dtb-$1
-[ ! -f "$dtb" ] || /usr/bin/python3 /usr/lib/synapse-image/hardware.py q6a-dtb --dtb "$dtb"
+[ ! -f "$dtb" ] || /usr/bin/python3 /usr/lib/synapse-image/hardware.py {subcommand} --dtb "$dtb"
 """,
         0o755,
     )
     return {
-        "spi_pins": [19, 21, 23, 24],
-        "uart_pins": [8, 10],
-        "pwm_pins": [5],
+        "spi_pins": profile["spi_pins"],
+        "uart_pins": profile["uart_pins"],
+        "pwm_pins": profile["pwm_pins"],
         "pwm": "software (kernel pwm-gpio); no hardware PWM routed to the header",
         "usb_c_gadget": False,
-        "usb_c_reason": "power-only; USB-A gadget operation excluded",
+        "usb_c_reason": "USB controllers are host-only on this board; gadget networking is unavailable",
+    }
+
+
+def configure_allwinner(root, board):
+    profile = ALLWINNER[board]
+    boot = root / "boot"
+    # Armbian's dtb symlink must resolve inside this image, not on the host.
+    directory = boot / profile["overlay_dir"]
+    overlays = [directory / f"{name}.dtbo" for name in profile["overlays"]]
+    base = boot / "dtb" / profile["dtb"]
+    if not base.is_file() or not all(p.is_file() for p in overlays):
+        raise ValueError(f"{board}: expected official header overlays are unavailable")
+    compatible(base, profile["compatible"])
+    # Test the complete combination against the board tree, not each alone.
+    with tempfile.TemporaryDirectory() as temporary:
+        combined = Path(temporary) / "combined.dtb"
+        merge_overlay(base, overlays, combined)
+        for symbol in profile["symbols"]:
+            path = subprocess.check_output(
+                ["fdtget", "-t", "s", str(combined), "/__symbols__", symbol], text=True
+            ).strip()
+            state = subprocess.check_output(
+                ["fdtget", "-t", "s", str(combined), path, "status"], text=True
+            ).strip()
+            if state != "okay":
+                raise ValueError(f"{board}: overlay did not enable {symbol}")
+    env = boot / "armbianEnv.txt"
+    text = env.read_text()
+    old = re.search(r"^overlays=(.*)$", text, re.M)
+    existing = old.group(1).split() if old else []
+    text = setting(text, "overlays", " ".join(dict.fromkeys(existing + profile["overlays"])))
+    env.write_text(text)
+    return {
+        **profile,
+        "pwm": "hardware",
+        "usb_c_gadget": False,
+        "usb_c_reason": "usbc0 is host-only (OTG broken); the board networks over WiFi 6",
     }
 
 
@@ -335,13 +432,18 @@ def configure_common(root):
 
 
 def configure(root, board):
-    check_kernel(root, gadget=board != "radxa-dragon-q6a", rp1=board == "rpi4b")
     if board == "rpi4b":
+        check_kernel(root, gadget=True, rp1=True)
         report = configure_pi(root)
     elif board in ROCKCHIP:
+        check_kernel(root, gadget=True)
         report = configure_rockchip(root, board)
-    elif board == "radxa-dragon-q6a":
-        report = configure_q6a(root)
+    elif board in QCOM:
+        check_kernel(root, gadget=False, require_pwm_gpio=True)
+        report = configure_qcom(root, board)
+    elif board in ALLWINNER:
+        check_kernel(root, gadget=False)
+        report = configure_allwinner(root, board)
     else:
         raise ValueError(f"Unsupported hardware profile: {board}")
     configure_common(root)
@@ -375,7 +477,12 @@ def validate(root):
     assert (root / "etc/synapse-image/usb-gadget-enabled").exists() == report[
         "usb_c_gadget"
     ]
-    check_kernel(root, gadget=report["usb_c_gadget"], rp1=board == "rpi4b")
+    check_kernel(
+        root,
+        gadget=report["usb_c_gadget"],
+        rp1=board == "rpi4b",
+        require_pwm_gpio=board in QCOM,
+    )
     if board == "rpi4b":
         boot = root / "boot/firmware"
         assert all(
@@ -384,7 +491,7 @@ def validate(root):
         config = (boot / "config.txt").read_text()
         assert "dtparam=spi=on" in config and "dtoverlay=synapse-rp1-pwm" in config
         assert "console=serial0" not in (boot / "cmdline.txt").read_text()
-    elif board == "radxa-dragon-q6a":
+    elif board in QCOM:
         for tree in (root / "boot").glob("armbian-dtb-*"):
             status = subprocess.check_output(
                 [
@@ -392,33 +499,42 @@ def validate(root):
                     "-t",
                     "s",
                     str(tree),
-                    "/soc@0/geniqup@ac0000/spi@a90000",
+                    QCOM[board]["spi_path"],
                     "status",
                 ],
                 text=True,
             ).strip()
             assert status == "okay"
-    else:
+    elif board in ROCKCHIP:
         env = (root / "boot/armbianEnv.txt").read_text()
         assert all(name in env for name in ROCKCHIP[board]["overlays"])
         assert "synapse-usb-c" in env
+        for key, value in ROCKCHIP[board].get("armbian_env", {}).items():
+            assert re.search(rf"^{key}={re.escape(value)}$", env, re.M)
+    elif board in ALLWINNER:
+        env = (root / "boot/armbianEnv.txt").read_text()
+        assert all(name in env for name in ALLWINNER[board]["overlays"])
     print(json.dumps(report, indent=2))
 
 
 def main():
+    dtb_commands = [f"{board.removeprefix('radxa-dragon-')}-dtb" for board in QCOM]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["configure", "q6a-dtb", "validate"])
+    parser.add_argument("command", choices=["configure", "validate", *dtb_commands])
     parser.add_argument("--root", type=Path, default=Path("/"))
     parser.add_argument("--board")
     parser.add_argument("--dtb", type=Path)
     args = parser.parse_args()
     if args.command == "validate":
         validate(args.root)
-    elif args.command == "q6a-dtb":
+    elif args.command.endswith("-dtb"):
+        board = "radxa-dragon-" + args.command.removesuffix("-dtb")
         if args.dtb is None:
-            parser.error("q6a-dtb requires --dtb")
-        configure_q6a_dtb(
-            args.dtb, Path("/usr/share/synapse-image/synapse-q6a-spi.dtbo")
+            parser.error(f"{args.command} requires --dtb")
+        configure_qcom_dtb(
+            args.dtb,
+            Path("/usr/share/synapse-image") / overlay_name(board),
+            board,
         )
     else:
         if not args.board:

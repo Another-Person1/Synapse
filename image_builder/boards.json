@@ -6,5 +6,8 @@
   "cm5": {"name": "Raspberry Pi Compute Module 5", "armbian_board": "rpi4b", "image_target": "raspberrypi"},
   "radxa-dragon-q6a": {"name": "Radxa Dragon Q6A", "armbian_board": "radxa-dragon-q6a"},
   "orangepi5": {"name": "Orange Pi 5", "armbian_board": "orangepi5"},
-  "orangepi5-plus": {"name": "Orange Pi 5 Plus", "armbian_board": "orangepi5-plus"}
+  "orangepi5-plus": {"name": "Orange Pi 5 Plus", "armbian_board": "orangepi5-plus"},
+  "rock-5b": {"name": "Radxa ROCK 5B", "armbian_board": "rock-5b"},
+  "radxa-dragon-q8b": {"name": "Radxa Dragon Q8B", "armbian_board": "radxa-dragon-q8b"},
+  "cubie-a7z": {"name": "Radxa Cubie A7Z", "armbian_board": "cubie-a7z", "allow_community": true}
 }

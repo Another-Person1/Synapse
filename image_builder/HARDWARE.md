@@ -38,7 +38,10 @@ module and carrier remains required before describing them as qualified.
 | CM4 | Configured, assuming a USB-C carrier | Carrier must route the module USB2 device signals to USB-C |
 | Orange Pi 5 | Configured | Data-capable USB-C, not the separate power input |
 | Orange Pi 5 Plus | Configured | Data-capable USB-C, not the separate power input |
+| ROCK 5B | Configured | Data-capable USB-C |
 | Dragon Q6A | Disabled | USB-C is power input; its USB-A OTG port is excluded |
+| Dragon Q8B | Disabled | Both USB controllers are host-only |
+| Cubie A7Z | Disabled | USB-C is host-only (OTG broken); use WiFi 6 or Ethernet |
 
 Only board-side USB-C device connections are supported. A standard host USB-A
 to board USB-C **data** cable is acceptable. USB-A to USB-A gadget connections
@@ -98,14 +101,50 @@ through the GPIO character-device interface.
 | Pi 5 / CM5 | 19, 21, 23, 24, 26; SPI0 | 8, 10; UART0 through RP1 | 32, 33; hardware RP1 PWM0, GPIO12/13 |
 | Orange Pi 5 | 19, 21, 23, 24; SPI4 M0 CS1 | 8, 10; UART0 M2 | 16; hardware PWM1 M1 |
 | Orange Pi 5 Plus | 19, 21, 23, 24; SPI0 M2 CS0 | 8, 10; UART6 M1 | 33; hardware PWM14 M0 |
+| ROCK 5B | 19, 21, 23, 24, 26; SPI0 M2 CS0/CS1 | 8, 10; UART2 M0, normally `/dev/ttyFIQ0` | 32; hardware PWM14 M0 |
 | Dragon Q6A | 19, 21, 23, 24; SPI12 CS0 | 8, 10; UART5, normally `/dev/ttyMSM0` | 5; **software PWM** using GPIO25 |
+| Dragon Q8B | 19, 21, 23, 24; SPI20 CS0 | 8, 10; UART17, normally `/dev/ttyMSM0` | 5; **software PWM** using GPIO42 |
+| Cubie A7Z | 19, 21, 23, 24; SPI1 (enabled in the base tree) | 7, 11; UART2 | 36; hardware PWM0 on PB4 |
 
-Q6A has no hardware PWM signal in Radxa's published 40-pin mux table. Its shipped
-kernel provides the upstream `pwm-gpio` driver, which this image exposes on pin 5.
-It is software timed and can jitter under load. It is unsuitable where precise
+Q6A and Q8B have no hardware PWM signal in Radxa's published 40-pin mux table. Their
+shipped kernels provide the upstream `pwm-gpio` driver, which this image exposes on
+pin 5. It is software timed and can jitter under load. It is unsuitable where precise
 pulse timing is required. No PWM waveform or frequency is started by provisioning;
 applications choose the period, duty cycle and enabled state through the PWM API.
 Inspect `/sys/class/pwm` to identify controllers rather than hard-coding chip numbers.
+
+### ROCK 5B
+
+The ROCK 5B routes its data USB-C through DWC3 controller 0 in peripheral mode
+(the same `synapse-usb-c` overlay as the Orange Pi boards). Header pins 8/10 are
+UART2 M0, which is also the Armbian serial console (`ttyFIQ0`); the image pins the
+kernel console to the display (`console=display` in `/boot/armbianEnv.txt`) and
+masks `serial-getty@ttyFIQ0.service` so the header UART belongs to applications.
+SPI0 M2 (pins 19/21/23/24/26) and PWM14 M0 (pin 32) are enabled with the official
+`rk3588-*` overlays.
+
+### Dragon Q8B
+
+The Q8B boots through GRUB with a per-kernel DTB (`/boot/armbian-dtb-*`), like the
+Q6A. SPI20 (GPIO87-90, header pins 19/21/23/24, CS0 only) is disabled by default, so
+the compiled `synapse-q8b-spi` overlay enables it with the `qup_spi20_data_clk` and
+`qup_spi20_cs` pinctrl groups and adds the userspace SPI child node. Header pins
+8/10 are UART17 (`/dev/ttyMSM0`); the image strips it from the kernel command line
+via GRUB and masks `serial-getty@ttyMSM0.service`. Both USB controllers are
+host-only, so USB-C gadget networking is unavailable on this board.
+
+### Cubie A7Z
+
+The Cubie A7Z has no recommended Armbian image, so its build opts into the
+community (`csc`) trixie vendor image (`allow_community` in `boards.json`); it is
+still checksum- and signature-verified. The board uses an MBR partition table.
+SPI1 on header pins 19/21/23/24 is already enabled with `spidev` in the base
+device tree, so no SPI overlay is needed. UART2 (header pins 7/11) and PWM0
+(pin 36) are enabled with the official `sun60i-a733-uart2` and
+`sun60i-a733-pwm0` overlays through `overlays=` in `/boot/armbianEnv.txt`. The
+console stays on UART0 (`/dev/ttyS0`, pins 8/10). The USB-C port is host-only
+(OTG is broken upstream), so USB-C gadget networking is unavailable; the board
+networks over its WiFi 6.
 
 Header I2C is **not enabled by Synapse**. Existing internal I2C controllers for
 power management, displays and other board functions are preserved. On Q6A,
@@ -116,7 +155,8 @@ are not interchangeable solely because headers have a similar physical layout.
 The `synapse` account belongs to `gpio`, `spi` and `dialout`. Narrow udev rules
 grant group access to GPIO chips, SPI devices and exported PWM controls; devices
 are not made world-writable. Header UART login consoles are disabled on Raspberry
-Pi and Q6A. The separate Orange Pi debug console is retained. Raspberry Pi
+Pi, the Q6A/Q8B (`ttyMSM0`) and the ROCK 5B (`ttyFIQ0`). The separate Orange Pi
+debug console is retained. Raspberry Pi
 Bluetooth serial attachment and analogue audio are disabled to free its UART and
 PWM resources. Camera auto-detection and the Pi 5 cooling-fan controller are retained.
 
@@ -124,7 +164,8 @@ The image includes `gpiod` tools and official `python-periphery` 2.5.0 in the
 runtime virtual environment, exposing `GPIO`, `SPI`, `PWM` and `Serial` APIs.
 Use `gpioinfo`, `ls /dev/spidev*` and `ls /sys/class/pwm` after boot to discover
 actual devices. The kernel-update hooks restore the RP1 overlay after Armbian's
-firmware refresh and reapply Q6A's SPI/software-PWM configuration to its GRUB DTB.
+firmware refresh and reapply the Q6A/Q8B SPI/software-PWM configuration to their
+GRUB DTBs.
 
 ## Validation and provenance
 
@@ -157,6 +198,25 @@ Official sources used:
   [header pin table](https://github.com/radxa-docs/docs/blob/main/docs/dragon/q6a/hardware-use/pin-gpio.md),
   [exact Armbian kernel board source](https://github.com/radxa/kernel/blob/linux-6.18.2/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts)
   and [GPIO PWM binding](https://github.com/radxa/kernel/blob/linux-6.18.2/Documentation/devicetree/bindings/pwm/pwm-gpio.yaml).
+- [Radxa ROCK 5B documentation](https://docs.radxa.com/en/rock5/5b),
+  [header pin table](https://docs.radxa.com/en/rock5/5b/hardware-design/hardware-interface),
+  and the `rockchip-rk3588` board family in
+  [Armbian's build framework](https://github.com/armbian/build/blob/main/config/boards/rock-5b.conf)
+  (RK3588 device tree, `rk3588-spi0-m2-cs0-cs1-spidev`/`rk3588-uart2-m0`/`rk3588-pwm14-m0`
+  overlays).
+- [Radxa Dragon Q8B documentation](https://docs.radxa.com/en/dragon/q8b),
+  [header pin table](https://github.com/radxa-docs/docs/blob/main/docs/dragon/q8b/hardware-use/pin-gpio.md),
+  the `sc8280xp` board family in
+  [Armbian's build framework](https://github.com/armbian/build/blob/main/config/boards/radxa-dragon-q8b.conf)
+  and the `radxa/kernel` `linux-7.0.11` branch
+  ([`sc8280xp-radxa-dragon-q8b.dts`](https://github.com/radxa/kernel/blob/linux-7.0.11/arch/arm64/boot/dts/qcom/sc8280xp-radxa-dragon-q8b.dts),
+  `qup_spi20_*`/`qup_uart17_*` pinctrl groups).
+- [Radxa Cubie A7Z documentation](https://docs.radxa.com/en/cubie/a7z),
+  [header pin table](https://github.com/radxa-docs/docs/blob/main/docs/cubie/a7z/hardware-use/pin-gpio.md),
+  the [`cubie-a7z.csc` board definition](https://github.com/armbian/build/blob/main/config/boards/cubie-a7z.csc),
+  the [`sun60iw2` family](https://github.com/armbian/build/blob/main/config/sources/families/sun60iw2.conf)
+  and its [`0005-cubie-a7z-add-device-tree.patch`](https://github.com/armbian/build/blob/main/patch/kernel/archive/sun60iw2-opi-vendor/0005-cubie-a7z-add-device-tree.patch)
+  (`sun60i-a733-uart2`/`sun60i-a733-pwm0` overlays, MBR partition table).
 - [Linux userspace SPI driver binding](https://github.com/torvalds/linux/blob/master/Documentation/spi/spidev.rst),
   [systemd network configuration](https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html),
   [Netplan configuration](https://netplan.readthedocs.io/en/stable/netplan-yaml/),

@@ -93,6 +93,107 @@ def test_recommended_kernel_wins_within_same_release():
     assert build.select_image({"assets": [current, vendor]}, "orangepi5") == vendor
 
 
+def community_asset(board="cubie-a7z", version="26.11.0-trunk.130", **changes):
+    """A community (csc) build: GitHub release asset, cache.armbian.com sidecars."""
+    source_board = build.BOARDS[board]["armbian_board"]
+    filename = (
+        f"Armbian_community_{version}_{source_board.capitalize()}"
+        f"_trixie_vendor_6.6.98_minimal.img.xz"
+    )
+    url = f"https://github.com/armbian/community/releases/download/{version}/{filename}"
+    cache = f"https://cache.armbian.com/artifacts/{source_board}/archive/{filename}"
+    result = {
+        "board_slug": source_board,
+        "board_support": "csc",
+        "variant": "minimal",
+        "distro": "trixie",
+        "branch": "vendor",
+        "armbian_version": version,
+        "file_url": url,
+        "file_url_sha": cache + ".sha",
+        "file_url_asc": cache + ".asc",
+        "file_extension": "img.xz",
+        "file_application": "",
+        "file_companion": "",
+        "promoted": "true",
+        "download_repository": "community",
+        "file_date": "2026-11-01T00:00:00Z",
+        "kernel_version": "6.6.98",
+    }
+    result.update(changes)
+    return result
+
+
+def test_community_build_is_accepted_only_where_the_board_opts_in():
+    cubie = community_asset()
+    assert build.select_image({"assets": [cubie]}, "cubie-a7z") == cubie
+    with pytest.raises(build.BuildError, match="no supported stable"):
+        build.select_image({"assets": [cubie]}, "rpi4b")
+    with pytest.raises(build.BuildError, match="no supported stable"):
+        build.select_image({"assets": [community_asset(board="rock-5b")]}, "rock-5b")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"download_repository": "ci"},
+        {"download_repository": "nightly"},
+        {"board_support": "conf", "download_repository": "community"},
+        {"armbian_version": "26.11.0"},
+        {"file_url": "https://github.com/stranger/community/releases/download/26.11.0-trunk.130/x.img.xz"},
+    ],
+)
+def test_malformed_community_records_are_rejected(change):
+    with pytest.raises(build.BuildError):
+        build.select_image({"assets": [community_asset(**change)]}, "cubie-a7z")
+
+
+def test_prepare_accepts_cache_artifact_sidecars_only_for_opted_in_community_boards(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(build, "load_mirrors", lambda: None)
+    monkeypatch.setattr(
+        build, "verify_signature", lambda image, signature: ["test-signer"]
+    )
+    wheel = make_wheel(tmp_path / "synapsefrc-1.0-py3-none-any.whl")
+    base_contents = b"official community base"
+    base_hash = hashlib.sha256(base_contents).hexdigest()
+    tarball = tmp_path / "synapse-python.tar.xz"
+    tarball.write_bytes(b"prebuilt interpreter")
+
+    def remote(url):
+        if url.endswith(".sha"):
+            filename = url.split("/")[-1].removesuffix(".sha")
+            return io.BytesIO(f"{base_hash}  {filename}\n".encode())
+        return io.BytesIO(base_contents)
+
+    monkeypatch.setattr(build, "open_official", remote)
+    work = tmp_path / "work"
+    work.mkdir()
+    base, metadata = build.prepare(
+        "cubie-a7z", {"assets": [community_asset()]}, wheel, work, tarball
+    )
+    assert build.sha256(base) == base_hash
+    assert metadata["armbian_board"] == "cubie-a7z"
+    assert metadata["base"]["armbian_version"] == "26.11.0-trunk.130"
+    assert metadata["base"]["download_repository"] == "community"
+
+    # The same sidecar host must stay rejected for a conf-only board.
+    candidate = asset("rpi4b")
+    filename = candidate["file_url"].split("/")[-1]
+    candidate["file_url_sha"] = (
+        f"https://cache.armbian.com/artifacts/rpi4b/archive/{filename}.sha"
+    )
+    with pytest.raises(build.BuildError, match="checksum URL"):
+        build.prepare("rpi4b", {"assets": [candidate]}, wheel, tmp_path / "work2")
+
+
+def test_stable_release_beats_older_community_trunk_for_opted_in_board():
+    conf = asset("cubie-a7z", version="26.11.2")
+    trunk = community_asset(version="26.11.0-trunk.130")
+    assert build.select_image({"assets": [trunk, conf]}, "cubie-a7z") == conf
+
+
 @pytest.mark.parametrize(
     "change",
     [

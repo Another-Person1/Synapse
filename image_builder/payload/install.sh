@@ -38,15 +38,26 @@ board=$(python3 -c 'import json; print(json.load(open("image-metadata.json"))["a
 python3 /tmp/synapse-build/hardware.py configure --board "$board"
 install -D -m 0644 hardware.py /usr/lib/synapse-image/hardware.py
 netplan generate
-if [[ $board == radxa-dragon-q6a ]]; then
-    update-grub
-    systemctl mask serial-getty@ttyMSM0.service
-elif [[ $board == rpi4b ]]; then
-    systemctl mask serial-getty@serial0.service serial-getty@ttyAMA0.service serial-getty@ttyS0.service hciuart.service
-elif [[ $board == orangepi5 ]]; then
-    # Armbian vendor kernels otherwise force the USB-C controller into host mode.
-    systemctl mask orangepi5-usb2-init.service
-fi
+case $board in
+    radxa-dragon-q6a|radxa-dragon-q8b)
+        # Strip the ttyMSM0 console from the kernel command line, then free the
+        # header UART (pins 8/10) from the login console.
+        update-grub
+        systemctl mask serial-getty@ttyMSM0.service
+        ;;
+    rpi4b)
+        systemctl mask serial-getty@serial0.service serial-getty@ttyAMA0.service serial-getty@ttyS0.service hciuart.service
+        ;;
+    rock-5b)
+        # hardware.py pins the kernel console to the display (console=display);
+        # ttyFIQ0 on header pins 8/10 belongs to applications.
+        systemctl mask serial-getty@ttyFIQ0.service
+        ;;
+    orangepi5)
+        # Armbian vendor kernels otherwise force the USB-C controller into host mode.
+        systemctl mask orangepi5-usb2-init.service
+        ;;
+esac
 mapfile -t build_packages < <(grep -Ev '^[[:space:]]*(#|$)' cpython-build-packages.txt)
 if [[ -f synapse-python.tar.xz ]]; then
     # Prebuilt by build-python.sh from the same pinned source, so no compiler is

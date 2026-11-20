@@ -17,7 +17,19 @@ def test_pi_aliases_produce_one_generically_named_artifact(alias):
     assert build.image_targets(alias) == ["raspberrypi"]
     assert build.BOARDS[alias]["armbian_board"] == "rpi4b"
     assert build.image_targets().count("raspberrypi") == 1
-    assert len(build.image_targets()) == 4
+    expected_targets = {v.get("image_target", k) for k, v in build.BOARDS.items()}
+    assert len(build.image_targets()) == len(expected_targets)
+
+
+def test_every_board_has_a_hardware_profile():
+    for board in build.BOARDS:
+        armbian_board = build.BOARDS[board]["armbian_board"]
+        assert (
+            armbian_board == "rpi4b"
+            or armbian_board in hardware.ROCKCHIP
+            or armbian_board in hardware.QCOM
+            or armbian_board in hardware.ALLWINNER
+        ), board
 
 
 def test_hostname_and_discovery_preserve_loopback_and_ipv6(tmp_path):
@@ -87,7 +99,7 @@ def test_q6a_overlay_is_valid_repeatable_and_keeps_i2c_disabled(tmp_path):
     hardware.compile_overlay(source, base)
     hardware.compile_overlay(hardware.HERE / "overlays/synapse-q6a-spi.dts", overlay)
     for _ in range(2):
-        hardware.configure_q6a_dtb(base, overlay)
+        hardware.configure_qcom_dtb(base, overlay, "radxa-dragon-q6a")
 
         def value(path, name):
             return subprocess.check_output(
@@ -101,7 +113,56 @@ def test_q6a_overlay_is_valid_repeatable_and_keeps_i2c_disabled(tmp_path):
     wrong.write_text('/dts-v1/; / { compatible = "wrong,board"; };')
     hardware.compile_overlay(wrong, base)
     with pytest.raises(ValueError, match="Unexpected device tree"):
-        hardware.configure_q6a_dtb(base, overlay)
+        hardware.configure_qcom_dtb(base, overlay, "radxa-dragon-q6a")
+
+
+@pytest.mark.skipif(not HAS_DTC, reason="Device tree compiler required")
+def test_q8b_overlay_enables_spi20_with_pinctrl_and_pwm_gpio(tmp_path):
+    source = tmp_path / "base.dts"
+    source.write_text("""/dts-v1/;
+/ { compatible = "radxa,dragon-q8b", "qcom,sc8280xp";
+    tlmm: gpio { gpio-controller; #gpio-cells = <2>; };
+    soc@0 { geniqup@8c0000 {
+        qup_spi20_data_clk: pinctrl { };
+        qup_spi20_cs: pinctrl { };
+        spi20: spi@890000 { #address-cells = <1>; #size-cells = <0>; status = "disabled"; };
+    }; };
+};""")
+    base, overlay = tmp_path / "base.dtb", tmp_path / "overlay.dtbo"
+    hardware.compile_overlay(source, base)
+    hardware.compile_overlay(hardware.HERE / "overlays/synapse-q8b-spi.dts", overlay)
+    hardware.configure_qcom_dtb(base, overlay, "radxa-dragon-q8b")
+
+    def value(path, name):
+        return subprocess.check_output(
+            ["fdtget", "-t", "s", str(base), path, name], text=True
+        ).strip()
+
+    spi = "/soc@0/geniqup@8c0000/spi@890000"
+    assert value(spi, "status") == "okay"
+    assert value(spi, "pinctrl-names") == "default"
+    assert value(f"{spi}/userspace-spi@0", "compatible") == "synapse,userspace-spi"
+    assert value("/synapse-pwm", "compatible") == "pwm-gpio"
+    wrong = tmp_path / "wrong.dts"
+    wrong.write_text('/dts-v1/; / { compatible = "radxa,dragon-q6a"; };')
+    hardware.compile_overlay(wrong, base)
+    with pytest.raises(ValueError, match="Unexpected device tree"):
+        hardware.configure_qcom_dtb(base, overlay, "radxa-dragon-q8b")
+
+
+def test_pwm_gpio_is_required_only_when_the_profile_asks_for_it(tmp_path):
+    boot = tmp_path / "boot"
+    boot.mkdir()
+    config = boot / "config-6.6"
+    config.write_text(
+        "\n".join(
+            f"CONFIG_{name}=y"
+            for name in ("GPIO_CDEV", "SPI_SPIDEV", "PWM", "SYSFS")
+        )
+    )
+    hardware.check_kernel(tmp_path, gadget=False)
+    with pytest.raises(ValueError, match="GPIO PWM"):
+        hardware.check_kernel(tmp_path, gadget=False, require_pwm_gpio=True)
 
 
 def test_shared_pi_firmware_respects_model_filters_and_enables_cm4_usb_c(

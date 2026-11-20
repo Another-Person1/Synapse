@@ -24,6 +24,8 @@ HERE = Path(__file__).resolve().parent
 BOARDS = json.loads((HERE / "boards.json").read_text())
 SOURCES = json.loads((HERE / "sources.json").read_text())
 STABLE_VERSION = re.compile(r"\d+\.\d+(?:\.\d+)*")
+# Community (CSC) builds carry a moving trunk tag, e.g. 26.11.0-trunk.130.
+TRUNK_VERSION = re.compile(r"\d+\.\d+\.\d+-trunk\.\d+")
 # Deliberately explicit: a new Debian stable must be qualified before enabling it.
 DEBIAN_RELEASES = {"trixie": 13, "bookworm": 12}
 MIRROR_REGISTRY = "https://dl.armbian.com/mirrors"
@@ -57,7 +59,9 @@ def official_url(url: str) -> str:
         raise BuildError(f"Expected an official HTTPS source: {url}")
     host = parsed.hostname
     allowed = (
-        host in {"dl.armbian.com", "github.armbian.com"}
+        # cache.armbian.com is Armbian's own artifact cache; the official
+        # inventory publishes checksum/signature URLs there for community builds.
+        host in {"dl.armbian.com", "github.armbian.com", "cache.armbian.com"}
         or (host == "raw.githubusercontent.com" and parsed.path.startswith("/armbian/"))
         or (
             host == "codeload.github.com" and parsed.path.startswith("/python/cpython/")
@@ -189,33 +193,52 @@ def sha256(path: Path) -> str:
 def select_image(index: dict, board: str) -> dict:
     """Choose the newest stable plain Debian minimal image, then recommendation."""
     source_board = BOARDS[board]["armbian_board"]
+    # Boards with no recommended (conf) image may opt into the community (csc)
+    # build explicitly; it is still checksum- and signature-verified.
+    allow_community = bool(BOARDS[board].get("allow_community"))
     if not isinstance(index, dict) or not isinstance(index.get("assets"), list):
         raise BuildError("Armbian inventory does not contain the expected assets list")
     candidates = []
     for asset in index.get("assets", []):
         if not isinstance(asset, dict):
             raise BuildError("Armbian inventory contains an invalid image record")
+        community = asset.get("download_repository") == "community"
+        version = asset.get("armbian_version", "")
+        stable = bool(STABLE_VERSION.fullmatch(version)) or (
+            community and bool(TRUNK_VERSION.fullmatch(version))
+        )
         if (
             asset.get("board_slug") != source_board
-            or asset.get("board_support") != "conf"
+            or asset.get("board_support") != ("csc" if community else "conf")
+            or (community and not allow_community)
             or asset.get("variant") != "minimal"
             or asset.get("distro") not in DEBIAN_RELEASES
             or asset.get("file_application")
             or asset.get("file_companion")
             or asset.get("file_extension") != "img.xz"
-            or not STABLE_VERSION.fullmatch(asset.get("armbian_version", ""))
-            or asset.get("download_repository") in {"ci", "nightly", "community"}
+            or not stable
+            or asset.get("download_repository") in {"ci", "nightly"}
         ):
             continue
         url = official_url(asset["file_url"])
         # Reject alternate UFS sector layouts and app bundles (OMV, HA, etc.).
         name = Path(urllib.parse.urlsplit(url).path).name
-        expected = re.fullmatch(
-            r"Armbian_[0-9.]+_[A-Za-z0-9-]+_"
-            + re.escape(asset["distro"])
-            + r"_(current|vendor|legacy|edge)_[0-9.]+_minimal\.img\.xz",
-            name,
-        )
+        if community:
+            expected = re.fullmatch(
+                r"Armbian_community_"
+                + re.escape(version)
+                + r"_[A-Za-z0-9-]+_"
+                + re.escape(asset["distro"])
+                + r"_(current|vendor|legacy|edge)_[0-9.]+_minimal\.img\.xz",
+                name,
+            )
+        else:
+            expected = re.fullmatch(
+                r"Armbian_[0-9.]+_[A-Za-z0-9-]+_"
+                + re.escape(asset["distro"])
+                + r"_(current|vendor|legacy|edge)_[0-9.]+_minimal\.img\.xz",
+                name,
+            )
         if not expected or expected[1] != asset.get("branch"):
             continue
         candidates.append(asset)
@@ -226,7 +249,9 @@ def select_image(index: dict, board: str) -> dict:
         )
 
     def rank(asset):
-        version = tuple(int(x) for x in asset["armbian_version"].split("."))
+        # Handles both stable "26.11.2" -> (26, 11, 2) and community trunk
+        # versions "26.11.0-trunk.130" -> (26, 11, 0, 130).
+        version = tuple(int(x) for x in re.findall(r"\d+", asset["armbian_version"]))
         promoted = str(asset.get("promoted", "false")).lower() == "true"
         return (
             version,
@@ -323,23 +348,43 @@ def prepare(
     wheel_info = wheel_details(wheel)
     url = asset["file_url"]
     filename = Path(urllib.parse.urlsplit(url).path).name
-    checksum_url = asset["file_url_sha"]
-    # Do not accept an inventory record that points at an unrelated checksum.
-    if checksum_url != url + ".sha":
-        raise BuildError(
-            "Official inventory checksum URL does not match the selected image"
-        )
+
+    def sidecar_url(field: str, suffix: str) -> str:
+        """Accept the sidecar next to the image or Armbian's artifact-cache copy.
+
+        Community (csc) builds publish checksums/signatures on cache.armbian.com
+        instead of next to the GitHub release asset; both are official Armbian
+        endpoints and must name exactly this file.
+        """
+        sidecar = asset.get(field, url + suffix)
+        if sidecar == url + suffix:
+            return sidecar
+        parts = urllib.parse.urlsplit(sidecar)
+        if (
+            asset.get("download_repository") == "community"
+            and BOARDS[board].get("allow_community")
+            and parts.scheme == "https"
+            and parts.hostname == "cache.armbian.com"
+            and parts.path.endswith("/" + filename + suffix)
+            and not parts.query
+            and not parts.fragment
+        ):
+            return sidecar
+        label = "checksum" if suffix == ".sha" else "signature"
+        raise BuildError(f"Inventory {label} URL does not match the selected image")
+
+    checksum_url = sidecar_url("file_url_sha", ".sha")
     load_mirrors()
-    with open_armbian(checksum_url) as response:
+    opener = open_armbian if checksum_url.startswith("https://dl.armbian.com/") else open_official
+    with opener(checksum_url) as response:
         checksum = parse_checksum(response.read(1024 * 1024).decode(), filename)
     cache = work / "downloads"
     base = cache / filename
     download(url, base, checksum)
-    signature_url = asset.get("file_url_asc", url + ".asc")
-    if signature_url != url + ".asc":
-        raise BuildError("Image signature URL does not match the selected image")
+    signature_url = sidecar_url("file_url_asc", ".asc")
     signature = cache / (filename + ".asc")
-    with open_armbian(signature_url) as response:
+    opener = open_armbian if signature_url.startswith("https://dl.armbian.com/") else open_official
+    with opener(signature_url) as response:
         signature.write_bytes(response.read(1024 * 1024))
     signers = verify_signature(base, signature)
     payload = work / "payload"
@@ -393,6 +438,8 @@ def prepare(
             key: asset[key]
             for key in (
                 "armbian_version",
+                "board_support",
+                "download_repository",
                 "distro",
                 "branch",
                 "kernel_version",

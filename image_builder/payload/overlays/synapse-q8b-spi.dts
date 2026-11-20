@@ -1,0 +1,32 @@
+// Radxa sc8280xp-radxa-dragon-q8b.dts: SPI20 uses GPIO87/88/89/90 (header
+// pins 23/19/21/24, CS0 on GPIO90) and is disabled by default, unlike UART17
+// on GPIO63/64 (header pins 8/10, the ttyMSM0 console).
+/dts-v1/;
+/plugin/;
+/ {
+    fragment@1 {
+        target-path = "/";
+        __overlay__ {
+            synapse_pwm: synapse-pwm {
+                compatible = "pwm-gpio";
+                #pwm-cells = <3>;
+                gpios = <&tlmm 42 0>;
+            };
+        };
+    };
+    fragment@0 {
+        target = <&spi20>;
+        __overlay__ {
+            status = "okay";
+            pinctrl-names = "default";
+            pinctrl-0 = <&qup_spi20_data_clk &qup_spi20_cs>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            synapse_spi: userspace-spi@0 {
+                compatible = "synapse,userspace-spi";
+                reg = <0>;
+                spi-max-frequency = <10000000>;
+            };
+        };
+    };
+};

@@ -12,8 +12,19 @@ before Armbian's recommendation chooses the kernel branch within that release.
 | --- | --- | --- |
 | `raspberrypi` | Pi 4, Pi 5, CM4, CM5 | shared `rpi4b` base |
 | `radxa-dragon-q6a` | Radxa Dragon Q6A | `radxa-dragon-q6a`, ordinary 512-byte-sector image |
+| `radxa-dragon-q8b` | Radxa Dragon Q8B | `radxa-dragon-q8b`, ordinary 512-byte-sector image |
 | `orangepi5` | Orange Pi 5 | `orangepi5` |
 | `orangepi5-plus` | Orange Pi 5 Plus | `orangepi5-plus` |
+| `rock-5b` | Radxa ROCK 5B | `rock-5b` |
+| `cubie-a7z` | Radxa Cubie A7Z | `cubie-a7z`, community (csc) build opted in via `allow_community` |
+
+Boards with no recommended (`conf`) image may set `allow_community: true` in
+`boards.json` to accept Armbian's **community (`csc`)** minimal build instead.
+Community images are still resolved only from Armbian's official inventory and
+endpoints (GitHub `armbian/community` releases plus `cache.armbian.com`
+checksum/signature sidecars) and are still SHA256- and GPG-verified against the
+pinned Armbian signing keys; `ci`/`nightly` repositories and non-Debian or
+non-minimal variants are never accepted.
 
 See [hardware and networking](HARDWARE.md) for `synapse.local:3000`, USB-C Ethernet,
 carrier requirements and the enabled SPI, GPIO, PWM and UART pins. Header I2C is
@@ -29,7 +40,7 @@ marked `trunk` are not stable releases even when their version number is higher.
 Run **Synapse Linux images** with `workflow_dispatch`, selecting one board or
 `all`.
 Pushes changing the builder on `main` or `codex/synapse-image-builder` also build
-four artifacts covering the board families above. Pull requests run checks without privileged image builds.
+seven artifacts covering the board families above. Pull requests run checks without privileged image builds.
 The workflow builds the current checkout's Python wheel and static UI once,
 downloads the ARM64 wheels into a wheelhouse on a native ARM64 runner, and
 builds the private CPython 3.12 once (cached until its source, build scripts or
@@ -222,8 +233,11 @@ CSI support and hardware acceleration are not implied by an ARM64 image build.
 - Armbian board pages: [Pi 4](https://armbian.com/boards/rpi4b),
   [Pi 5](https://armbian.com/boards/raspberrypi5),
   [Q6A](https://armbian.com/boards/radxa-dragon-q6a),
+  [Q8B](https://armbian.com/boards/radxa-dragon-q8b),
   [Orange Pi 5](https://armbian.com/boards/orangepi5),
-  [Orange Pi 5 Plus](https://armbian.com/boards/orangepi5-plus).
+  [Orange Pi 5 Plus](https://armbian.com/boards/orangepi5-plus),
+  [ROCK 5B](https://armbian.com/boards/rock-5b),
+  [Cubie A7Z](https://armbian.com/boards/cubie-a7z).
 - [Armbian inventory generator](https://github.com/armbian/armbian.github.io/blob/main/scripts/generate-armbian-images-json.sh),
   [Pi 5 artifact reuse](https://github.com/armbian/armbian.github.io/blob/main/release-targets/reusable.yml),
   and [official board definitions](https://github.com/armbian/build/tree/main/config/boards).

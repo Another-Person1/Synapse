@@ -64,8 +64,10 @@ Builds signed Armbian Debian **minimal** images with Synapse preinstalled.
 - CI: `.github/workflows/synapse_images.yml`, jobs `test`, `matrix`, `wheel`,
   `wheelhouse` (downloads ARM64 wheels natively on an ARM runner),
   `cpython` (builds one shared CPython, cached on distro+sources), `image`
-  (per board, `max-parallel: 4`), and `release` (attaches images to the GitHub
-  release on `v*` tags).
+  (per board, all targets in parallel), and `release` (attaches images to the
+  GitHub release on `v*` tags). Boards without a recommended Armbian image may
+  opt into the verified community (`csc`) build with `allow_community` in
+  `boards.json`.
 - Local build needs native ARM64 Linux + root: `bash image_builder/build-wheel.sh`,
   then `python3 -m image_builder.build build --board <board> --wheel dist/image-builder/*.whl --work-dir <fresh> [--python-tarball ...] [--wheelhouse ...]`.
 - **Do not weaken the security invariants**: official HTTPS URLs only

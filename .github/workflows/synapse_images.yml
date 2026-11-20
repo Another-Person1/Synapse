@@ -26,7 +26,7 @@ on:
       board:
         description: Board to build (all builds every supported board)
         type: choice
-        options: [all, raspberrypi, radxa-dragon-q6a, orangepi5, orangepi5-plus]
+        options: [all, raspberrypi, radxa-dragon-q6a, radxa-dragon-q8b, orangepi5, orangepi5-plus, rock-5b, cubie-a7z]
         default: all
         required: true
 
@@ -236,7 +236,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 4
+      # No max-parallel cap: every image target runs at once.
       matrix:
         board: ${{ fromJSON(needs.matrix.outputs.boards) }}
     steps:
