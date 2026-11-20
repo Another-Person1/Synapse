@@ -35,7 +35,8 @@ then modifies each distinct board image on a native ARM64 Ubuntu runner.
 Pi 4, Pi 5, CM4 and CM5 share the generically named `raspberrypi` artifact.
 Armbian still identifies its shared base as `rpi4b`. The builder checks for all
 four models' firmware trees; carrier-specific boot and camera validation remain necessary. It uploads
-`.img.xz`, `.sha256` and `.json` artifacts and does not publish a release.
+`.img.xz`, `.sha256` and `.json` artifacts. On `v*` tags every board is built
+and the images are attached to the GitHub release.
 
 ## Build locally
 

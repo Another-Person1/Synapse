@@ -31,7 +31,7 @@ install:
 	@$(CD) synapse_ui && bun run build
 	@$(CD) ..
 	@echo Building simulator renderer...
-	@$(CD) synapse_sim && npm run build:headless
+	@$(CD) synapse_sim && bun run build:headless
 	@$(CD) ..
 	@echo Installing Synapse Package...
 	pip install .

@@ -26,14 +26,15 @@
 - `synapse_net`: Contains the networking library for the runtime, including NetworkTables and socket communication, as well as Protocol Buffers message definitions.
 - `synapse_lib` Contains the vendordep library for the robot to communicate with the Synapse runtime.
 - `synapse_ui`: Contains the graphical user interface (UI) for interacting with the Synapse runtime.
-- `synapse_imager`: Builds release images for coprocessors with the runtime and a sample project preinstalled.
+- `image_builder`: Builds signed Synapse images for coprocessors with the runtime and a sample project preinstalled.
 
 ## Linux images
 
 The [Linux image builder](image_builder/README.md) creates Synapse images from
 the latest supported Armbian Debian CLI minimal releases for Raspberry Pi 4/5,
 Radxa Dragon Q6A, Orange Pi 5 and Orange Pi 5 Plus. The **Synapse Linux images**
-GitHub Actions workflow builds selected boards on demand.
+GitHub Actions workflow builds selected boards on demand, and builds every
+board and attaches the images to the GitHub release on `v*` tags.
 
 ## JavaScript development
 
@@ -58,10 +59,12 @@ Selecting Pi 5 explicitly resolves to the same shared Pi artifact.
 
 Build and test workflows remain automatic. Superseded validation runs are
 cancelled when a newer commit arrives on the same branch or pull request.
-PR labeling, development-library publishing, and PyPI publishing are manual-only
-under Actions. The labeler requires a pull request number. Tagged desktop
-manager builds and manually requested releases retain their existing triggers.
-Image builds run when their application, dependency, or builder inputs change.
+PR labeling is manual-only under Actions and requires a pull request number.
+PyPI publishing runs on `v*` tags, the SynapseLib dev release runs on pushes to
+`main` that touch the library, and tagged desktop manager builds keep their
+existing triggers; all of them can also be requested manually. Image builds
+run when their application, dependency, or builder inputs change, and every
+board is built for the release on `v*` tags.
 
 ## License
 
