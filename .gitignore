@@ -11,3 +11,6 @@ dist/
 synapse_lib/vendordep/docs/**
 .venv/
 venv/
+
+# Local editor settings (synapse_manager/.vscode stays tracked)
+/.vscode/
