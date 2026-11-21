@@ -16,6 +16,7 @@ before Armbian's recommendation chooses the kernel branch within that release.
 | `orangepi5` | Orange Pi 5 | `orangepi5` |
 | `orangepi5-plus` | Orange Pi 5 Plus | `orangepi5-plus` |
 | `rock-5b` | Radxa ROCK 5B | `rock-5b` |
+| `rock-5c` | Radxa ROCK 5C | `rock-5c` (vendor kernel) |
 | `cubie-a7z` | Radxa Cubie A7Z | `cubie-a7z`, community (csc) build opted in via `allow_community` |
 
 Boards with no recommended (`conf`) image may set `allow_community: true` in
@@ -237,6 +238,7 @@ CSI support and hardware acceleration are not implied by an ARM64 image build.
   [Orange Pi 5](https://armbian.com/boards/orangepi5),
   [Orange Pi 5 Plus](https://armbian.com/boards/orangepi5-plus),
   [ROCK 5B](https://armbian.com/boards/rock-5b),
+  [ROCK 5C](https://armbian.com/boards/rock-5c),
   [Cubie A7Z](https://armbian.com/boards/cubie-a7z).
 - [Armbian inventory generator](https://github.com/armbian/armbian.github.io/blob/main/scripts/generate-armbian-images-json.sh),
   [Pi 5 artifact reuse](https://github.com/armbian/armbian.github.io/blob/main/release-targets/reusable.yml),

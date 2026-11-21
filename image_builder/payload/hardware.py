@@ -45,6 +45,26 @@ ROCKCHIP = {
         "uart_pins": [8, 10],
         "pwm_pins": [32],
     },
+    "rock-5c": {
+        "dtb": "rockchip/rk3588s-rock-5c.dtb",
+        "compatible": ["radxa,rock-5c"],
+        # Pins 19/21/23/24 = SPI4 M2 MOSI/MISO/CLK/CS0, pins 8/10 = UART2 M0
+        # (same fiq_debugger hand-off as the ROCK 5B), pin 13 = PWM14 M1.
+        "overlays": [
+            "rk3588-spi4-m2-cs0-spidev",
+            "rk3588-uart2-m0",
+            "rk3588-pwm14-m1",
+        ],
+        "symbols": ("spi4", "uart2", "pwm14"),
+        "armbian_env": {"console": "display"},
+        # USB-C is power-only; the OTG controller sits behind a USB-A port,
+        # which is excluded from gadget use like on the Dragon Q6A.
+        "usb_c_gadget": False,
+        "usb_c_reason": "USB-C is power-only; USB-A OTG gadget operation excluded",
+        "spi_pins": [19, 21, 23, 24],
+        "uart_pins": [8, 10],
+        "pwm_pins": [13],
+    },
 }
 # Qualcomm boards boot through GRUB with a per-kernel device tree file; a
 # compiled overlay is merged into every /boot/armbian-dtb-* tree.
@@ -270,13 +290,17 @@ def configure_rockchip(root, board):
     if not base.is_file() or not all(p.is_file() for p in overlays):
         raise ValueError(f"{board}: expected official header overlays are unavailable")
     compatible(base, profile["compatible"])
-    destination = boot / "overlay-user/synapse-usb-c.dtbo"
-    compile_overlay(HERE / "overlays/synapse-rockchip-usb-c.dts", destination)
+    gadget = profile.get("usb_c_gadget", True)
+    merged = list(overlays)
+    if gadget:
+        destination = boot / "overlay-user/synapse-usb-c.dtbo"
+        compile_overlay(HERE / "overlays/synapse-rockchip-usb-c.dts", destination)
+        merged.append(destination)
     # Test the complete combination against the board tree, not each alone.
     with tempfile.TemporaryDirectory() as temporary:
         combined = Path(temporary) / "combined.dtb"
-        merge_overlay(base, overlays + [destination], combined)
-        for symbol in (*profile["symbols"], "usbdrd_dwc3_0"):
+        merge_overlay(base, merged, combined)
+        for symbol in (*profile["symbols"], *(["usbdrd_dwc3_0"] if gadget else [])):
             path = subprocess.check_output(
                 ["fdtget", "-t", "s", str(combined), "/__symbols__", symbol], text=True
             ).strip()
@@ -285,24 +309,27 @@ def configure_rockchip(root, board):
             ).strip()
             if state != "okay":
                 raise ValueError(f"{board}: overlay did not enable {symbol}")
-        role = subprocess.check_output(
-            ["fdtget", "-t", "s", str(combined), path, "dr_mode"], text=True
-        ).strip()
-        if role != "peripheral":
-            raise ValueError(f"{board}: USB-C is not configured for device mode")
+        if gadget:
+            role = subprocess.check_output(
+                ["fdtget", "-t", "s", str(combined), path, "dr_mode"], text=True
+            ).strip()
+            if role != "peripheral":
+                raise ValueError(f"{board}: USB-C is not configured for device mode")
     env = boot / "armbianEnv.txt"
     text = env.read_text()
     for key, additions in (
         ("overlays", profile["overlays"]),
-        ("user_overlays", ["synapse-usb-c"]),
+        ("user_overlays", ["synapse-usb-c"] if gadget else []),
     ):
+        if not additions:
+            continue
         old = re.search(rf"^{key}=(.*)$", text, re.M)
         existing = old.group(1).split() if old else []
         text = setting(text, key, " ".join(dict.fromkeys(existing + additions)))
     for key, value in profile.get("armbian_env", {}).items():
         text = setting(text, key, value)
     env.write_text(text)
-    return {**profile, "pwm": "hardware", "usb_c_gadget": True}
+    return {**profile, "pwm": "hardware", "usb_c_gadget": gadget}
 
 
 def overlay_name(board):
@@ -445,7 +472,7 @@ def configure(root, board):
         check_kernel(root, gadget=True, rp1=True)
         report = configure_pi(root)
     elif board in ROCKCHIP:
-        check_kernel(root, gadget=True)
+        check_kernel(root, gadget=ROCKCHIP[board].get("usb_c_gadget", True))
         report = configure_rockchip(root, board)
     elif board in QCOM:
         check_kernel(root, gadget=False, require_pwm_gpio=True)
@@ -517,7 +544,7 @@ def validate(root):
     elif board in ROCKCHIP:
         env = (root / "boot/armbianEnv.txt").read_text()
         assert all(name in env for name in ROCKCHIP[board]["overlays"])
-        assert "synapse-usb-c" in env
+        assert ("synapse-usb-c" in env) == ROCKCHIP[board].get("usb_c_gadget", True)
         for key, value in ROCKCHIP[board].get("armbian_env", {}).items():
             assert re.search(rf"^{key}={re.escape(value)}$", env, re.M)
     elif board in ALLWINNER:

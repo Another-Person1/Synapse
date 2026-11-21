@@ -48,7 +48,7 @@ case $board in
     rpi4b)
         systemctl mask serial-getty@serial0.service serial-getty@ttyAMA0.service serial-getty@ttyS0.service hciuart.service
         ;;
-    rock-5b)
+    rock-5b|rock-5c)
         # hardware.py pins the kernel console to the display (console=display)
         # and the uart2-m0 overlay turns header pins 8/10 into ttyS2 (replacing
         # the vendor ttyFIQ0 debugger); neither may carry a login console.

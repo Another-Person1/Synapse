@@ -8,6 +8,7 @@
   "orangepi5": {"name": "Orange Pi 5", "armbian_board": "orangepi5"},
   "orangepi5-plus": {"name": "Orange Pi 5 Plus", "armbian_board": "orangepi5-plus"},
   "rock-5b": {"name": "Radxa ROCK 5B", "armbian_board": "rock-5b"},
+  "rock-5c": {"name": "Radxa ROCK 5C", "armbian_board": "rock-5c", "branch": "vendor"},
   "radxa-dragon-q8b": {"name": "Radxa Dragon Q8B", "armbian_board": "radxa-dragon-q8b"},
   "cubie-a7z": {"name": "Radxa Cubie A7Z", "armbian_board": "cubie-a7z", "allow_community": true}
 }

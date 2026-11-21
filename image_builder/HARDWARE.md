@@ -39,6 +39,7 @@ module and carrier remains required before describing them as qualified.
 | Orange Pi 5 | Configured | Data-capable USB-C, not the separate power input |
 | Orange Pi 5 Plus | Configured | Data-capable USB-C, not the separate power input |
 | ROCK 5B | Configured | Data-capable USB-C |
+| ROCK 5C | Disabled | USB-C is power input; its USB-A OTG port is excluded |
 | Dragon Q6A | Disabled | USB-C is power input; its USB-A OTG port is excluded |
 | Dragon Q8B | Disabled | Both USB controllers are host-only |
 | Cubie A7Z | Disabled | USB-C is host-only (OTG broken); use WiFi 6 or Ethernet |
@@ -102,6 +103,7 @@ through the GPIO character-device interface.
 | Orange Pi 5 | 19, 21, 23, 24; SPI4 M0 CS1 | 8, 10; UART0 M2 | 16; hardware PWM1 M1 |
 | Orange Pi 5 Plus | 19, 21, 23, 24; SPI0 M2 CS0 | 8, 10; UART6 M1 | 33; hardware PWM14 M0 |
 | ROCK 5B | 19, 21, 23, 24, 26; SPI0 M2 CS0/CS1 | 8, 10; UART2 M0, normally `/dev/ttyS2` | 32; hardware PWM14 M0 |
+| ROCK 5C | 19, 21, 23, 24; SPI4 M2 CS0 | 8, 10; UART2 M0, normally `/dev/ttyS2` | 13; hardware PWM14 M1 |
 | Dragon Q6A | 19, 21, 23, 24; SPI12 CS0 | 8, 10; UART5, normally `/dev/ttyMSM0` | 5; **software PWM** using GPIO25 |
 | Dragon Q8B | 19, 21, 23, 24; SPI20 CS0 | 8, 10; UART17, normally `/dev/ttyMSM0` | 5; **software PWM** using GPIO42 |
 | Cubie A7Z | 19, 21, 23, 24; SPI1 (enabled in the base tree) | 7, 11; UART2 | 36; hardware PWM0 on PB4 |
@@ -125,6 +127,18 @@ serial gettys so the header UART belongs to applications. U-Boot still prints
 its boot log on these pins before Linux starts.
 SPI0 M2 (pins 19/21/23/24/26) and PWM14 M0 (pin 32) are enabled with the official
 `rk3588-*` overlays.
+
+### ROCK 5C
+
+The ROCK 5C build pins Armbian's `vendor` kernel branch (`"branch": "vendor"` in
+`boards.json`), the same Rockchip 6.1 tree as the other RK3588 boards, so its
+official `rk3588-*` overlay names apply; Armbian's mainline `current` image uses
+a different overlay set. Header pins 8/10 are UART2 M0 and are handled exactly like
+the ROCK 5B (`/dev/ttyS2`, kernel console on the display, gettys masked). SPI4 M2
+(pins 19/21/23/24, CS0) and PWM14 M1 (pin 13) use the official
+`rk3588-spi4-m2-cs0-spidev` and `rk3588-pwm14-m1` overlays. The USB-C port is a
+power input and the board tree sets the OTG controller to host mode behind a
+USB-A port, so USB gadget networking is disabled.
 
 ### Dragon Q8B
 
@@ -158,7 +172,7 @@ are not interchangeable solely because headers have a similar physical layout.
 The `synapse` account belongs to `gpio`, `spi` and `dialout`. Narrow udev rules
 grant group access to GPIO chips, SPI devices and exported PWM controls; devices
 are not made world-writable. Header UART login consoles are disabled on Raspberry
-Pi, the Q6A/Q8B (`ttyMSM0`) and the ROCK 5B (`ttyS2`). The separate Orange Pi
+Pi, the Q6A/Q8B (`ttyMSM0`) and the ROCK 5B/5C (`ttyS2`). The separate Orange Pi
 debug console is retained. Raspberry Pi
 Bluetooth serial attachment and analogue audio are disabled to free its UART and
 PWM resources. Camera auto-detection and the Pi 5 cooling-fan controller are retained.
@@ -207,6 +221,11 @@ Official sources used:
   [Armbian's build framework](https://github.com/armbian/build/blob/main/config/boards/rock-5b.conf)
   (RK3588 device tree, `rk3588-spi0-m2-cs0-cs1-spidev`/`rk3588-uart2-m0`/`rk3588-pwm14-m0`
   overlays).
+- [Radxa ROCK 5C header pin table](https://github.com/radxa-docs/docs/blob/main/docs/rock5/rock5c/hardware-design/hardware-interface.md),
+  [Armbian board page](https://armbian.com/boards/rock-5c) and Armbian's vendor kernel
+  [`rk3588s-rock-5c.dts`](https://github.com/armbian/linux-rockchip/blob/rk-6.1-rkr5.1/arch/arm64/boot/dts/rockchip/rk3588s-rock-5c.dts)
+  and [overlays](https://github.com/armbian/linux-rockchip/tree/rk-6.1-rkr5.1/arch/arm64/boot/dts/rockchip/overlay)
+  (`rk3588-spi4-m2-cs0-spidev`, `rk3588-uart2-m0`, `rk3588-pwm14-m1`).
 - [Radxa Dragon Q8B documentation](https://docs.radxa.com/en/dragon/q8b),
   [header pin table](https://github.com/radxa-docs/docs/blob/main/docs/dragon/q8b/hardware-use/pin-gpio.md),
   the `sc8280xp` board family in

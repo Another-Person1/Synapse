@@ -10,10 +10,9 @@ import pytest
 from image_builder import build
 
 
-def asset(
-    board="rpi4b", version="26.8.1", distro="trixie", branch="current", **changes
-):
+def asset(board="rpi4b", version="26.8.1", distro="trixie", branch=None, **changes):
     source_board = build.BOARDS[board]["armbian_board"]
+    branch = branch or build.BOARDS[board].get("branch", "current")
     filename = f"Armbian_{version}_{source_board.capitalize()}_{distro}_{branch}_6.18.42_minimal.img.xz"
     url = f"https://dl.armbian.com/{source_board}/archive/{filename}"
     result = {
@@ -192,6 +191,15 @@ def test_stable_release_beats_older_community_trunk_for_opted_in_board():
     conf = asset("cubie-a7z", version="26.11.2")
     trunk = community_asset(version="26.11.0-trunk.130")
     assert build.select_image({"assets": [trunk, conf]}, "cubie-a7z") == conf
+
+
+def test_branch_pin_selects_only_that_kernel_branch():
+    # Without the pin, "current" outranks "vendor" for the same release.
+    vendor = asset("rock-5c", version="26.8.3", branch="vendor")
+    current = asset("rock-5c", version="26.8.3", branch="current")
+    assert build.select_image({"assets": [current, vendor]}, "rock-5c") == vendor
+    with pytest.raises(build.BuildError, match="no supported stable"):
+        build.select_image({"assets": [current]}, "rock-5c")
 
 
 def test_recommended_image_beats_same_version_community_trunk():

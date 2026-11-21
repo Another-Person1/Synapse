@@ -205,6 +205,9 @@ def select_image(index: dict, board: str) -> dict:
     # Boards with no recommended (conf) image may opt into the community (csc)
     # build explicitly; it is still checksum- and signature-verified.
     allow_community = bool(BOARDS[board].get("allow_community"))
+    # Optional kernel-branch pin: the hardware profile's overlay names and
+    # console handling are written for one branch (e.g. Rockchip vendor 6.1).
+    branch = BOARDS[board].get("branch")
     if not isinstance(index, dict) or not isinstance(index.get("assets"), list):
         raise BuildError("Armbian inventory does not contain the expected assets list")
     candidates = []
@@ -220,6 +223,7 @@ def select_image(index: dict, board: str) -> dict:
             asset.get("board_slug") != source_board
             or asset.get("board_support") != ("csc" if community else "conf")
             or (community and not allow_community)
+            or (branch is not None and asset.get("branch") != branch)
             or asset.get("variant") != "minimal"
             or asset.get("distro") not in DEBIAN_RELEASES
             or asset.get("file_application")
