@@ -485,6 +485,9 @@ def test_shell_scripts_parse():
     scripts = list(build.HERE.glob("*.sh")) + list(
         (build.HERE / "payload").glob("*.sh")
     )
-    scripts.append(build.HERE / "payload/synapse-firstboot")
+    scripts += [
+        build.HERE / "payload" / name
+        for name in ("synapse-firstboot", "synapse-usb-ethernet", "synapse-pwm-permissions")
+    ]
     for script in scripts:
         subprocess.run(["bash", "-n", str(script)], check=True)

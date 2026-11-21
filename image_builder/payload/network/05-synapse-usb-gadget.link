@@ -1,7 +1,10 @@
+# Gadget network devices (RNDIS and CDC-ECM; see synapse-usb-ethernet).
+# u_ether reports "g_ether" as the driver for both. Keep the kernel names and
+# the per-device MACs the gadget script derived; earlier .link files win, so
+# 99-default.link never rewrites them.
 [Match]
 Driver=g_ether
 
 [Link]
-NamePolicy=
-Name=synapseusb0
+NamePolicy=kernel
 MACAddressPolicy=none

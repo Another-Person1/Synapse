@@ -52,9 +52,13 @@ or architecture differs. Base images are cached by their official URL, and
 their SHA256 and signature are still checked on every use.
 Pi 4, Pi 5, CM4 and CM5 share the generically named `raspberrypi` artifact.
 Armbian still identifies its shared base as `rpi4b`. The builder checks for all
-four models' firmware trees; carrier-specific boot and camera validation remain necessary. It uploads
-`.img.xz`, `.sha256` and `.json` artifacts. On `v*` tags every board is built
-and the images are attached to the GitHub release.
+four models' firmware trees; carrier-specific boot and camera validation remain necessary. Each
+`.img.xz` is uploaded unzipped, as its own artifact, so the download can be given
+straight to Raspberry Pi Imager, Etcher or `xz -dc | dd`. The `.sha256` and
+`.json` files are in a separate `synapse-<board>-metadata` artifact. A zipped
+image must never be flashed as-is: flashing tools unwrap only one layer, write
+compressed data, and the board's bootloader then finds no partition table.
+On `v*` tags every board is built and the images are attached to the GitHub release.
 
 ## Build locally
 

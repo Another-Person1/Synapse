@@ -1,5 +1,8 @@
+# networkd uses the first matching .network file across all directories, in
+# name order. 05- sorts before netplan's generated 10-netplan-*.network, whose
+# usb* match would otherwise make the gadget a DHCP client. Only the gadget
+# configuration the host activates has carrier, so only that one is configured.
 [Match]
-Name=synapseusb0
 Driver=g_ether
 
 [Link]

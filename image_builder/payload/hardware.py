@@ -111,6 +111,17 @@ PI_DTBS = {
     "CM4": ["bcm2711-rpi-cm4.dtb", "bcm2711-rpi-cm4-io.dtb"],
     "CM5": ["bcm2712-rpi-cm5-cm5io.dtb"],
 }
+# run-parts runs hooks in C-locale name order. The name must sort after
+# Armbian's zzz-copy-new-files / zzz-remove-old-files ("zzz-" < "zzzz"), which
+# recreate the overlays directory; an earlier hook's copy would be deleted.
+PI_OVERLAY_HOOK = "zzzz-synapse-rp1-pwm"
+PI_OVERLAY_HOOK_DIRECTORIES = ("etc/kernel/postinst.d", "etc/kernel/postrm.d")
+PI_OVERLAY_RESTORE = """#!/bin/sh
+set -eu
+# Removing the last kernel also removes the overlays directory; nothing to restore.
+[ -d /boot/firmware/overlays ] || exit 0
+install -m 0644 /usr/share/synapse-image/synapse-rp1-pwm.dtbo /boot/firmware/overlays/synapse-rp1-pwm.dtbo
+"""
 
 
 def write(root, name, content, mode=0o644):
@@ -167,7 +178,12 @@ def check_kernel(root, gadget=True, rp1=False, require_pwm_gpio=False):
         raise ValueError("No auditable kernel configuration in the image")
     required = ["CONFIG_GPIO_CDEV", "CONFIG_SPI_SPIDEV", "CONFIG_PWM", "CONFIG_SYSFS"]
     if gadget:
-        required += ["CONFIG_USB_ETH", "CONFIG_USB_ETH_RNDIS"]
+        # synapse-usb-ethernet builds a configfs RNDIS + CDC-ECM gadget.
+        required += [
+            "CONFIG_USB_CONFIGFS",
+            "CONFIG_USB_CONFIGFS_RNDIS",
+            "CONFIG_USB_CONFIGFS_ECM",
+        ]
     if rp1:
         required += ["CONFIG_PWM_BCM2835", "CONFIG_PWM_RP1", "CONFIG_USB_DWC2"]
     for config in configs:
@@ -199,20 +215,15 @@ def configure_pi(root):
     compile_overlay(
         HERE / "overlays/synapse-rp1-pwm.dts", boot / "overlays/synapse-rp1-pwm.dtbo"
     )
-    # Armbian refreshes firmware overlays on kernel upgrades. Restore our
-    # compiled overlay after the distro hook, without changing vendor trees.
+    # Armbian replaces /boot/firmware/overlays wholesale when a kernel is
+    # installed (postinst.d/zzz-copy-new-files) or removed
+    # (postrm.d/zzz-remove-old-files). Restore our compiled overlay after those
+    # hooks, without changing vendor trees.
     persisted = root / "usr/share/synapse-image/synapse-rp1-pwm.dtbo"
     persisted.parent.mkdir(parents=True, exist_ok=True)
     persisted.write_bytes((boot / "overlays/synapse-rp1-pwm.dtbo").read_bytes())
-    write(
-        root,
-        "etc/kernel/postinst.d/zz-synapse-rp1-pwm",
-        """#!/bin/sh
-set -eu
-install -m 0644 /usr/share/synapse-image/synapse-rp1-pwm.dtbo /boot/firmware/overlays/synapse-rp1-pwm.dtbo
-""",
-        0o755,
-    )
+    for directory in PI_OVERLAY_HOOK_DIRECTORIES:
+        write(root, f"{directory}/{PI_OVERLAY_HOOK}", PI_OVERLAY_RESTORE, 0o755)
     # Resolve the new RP1 overlay against both actual signed-base trees.
     with tempfile.TemporaryDirectory() as temporary:
         for model in ("Pi 5", "CM5"):
@@ -527,6 +538,10 @@ def validate(root):
         config = (boot / "config.txt").read_text()
         assert "dtparam=spi=on" in config and "dtoverlay=synapse-rp1-pwm" in config
         assert "console=serial0" not in (boot / "cmdline.txt").read_text()
+        for directory in PI_OVERLAY_HOOK_DIRECTORIES:
+            hooks = sorted(path.name for path in (root / directory).iterdir())
+            # Our restore must be the last hook, after any overlay refresh.
+            assert hooks[-1] == PI_OVERLAY_HOOK, f"{directory} order: {hooks}"
     elif board in QCOM:
         for tree in (root / "boot").glob("armbian-dtb-*"):
             status = subprocess.check_output(

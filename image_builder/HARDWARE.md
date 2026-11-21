@@ -53,15 +53,22 @@ peripherals and USB Ethernet adapters to remaining supported host ports.
 On Orange Pi 5 vendor kernels, the conflicting Armbian USB host-forcing service
 is masked. Kernel adapters and other ports retain their host support.
 
-The gadget uses the kernel's CDC-ECM/RNDIS `g_ether` driver. Device and host MAC
-addresses are derived from the per-device machine ID, not baked into the image.
-The link is named `synapseusb0` by a driver-specific udev/networkd rule.
+The gadget is a configfs composite device (`1d6b:0104`) built by
+`synapse-usb-ethernet`. Configuration 1 is RNDIS with Microsoft OS descriptors,
+so Windows 10/11 installs its built-in RNDIS driver automatically. Configuration
+2 is CDC-ECM. The legacy `g_ether` module is not used, because it sends no OS
+descriptors and Windows binds it as a "USB Serial Device (COMx)" with no network
+adapter. Device and host MAC addresses and the USB serial number are derived from
+the per-device machine ID, not baked into the image. Each configuration has its
+own kernel `usbN` link. `05-synapse-usb-gadget.network` matches both by driver
+and sorts ahead of netplan's generated files; only the link the host activates
+has carrier and is configured.
 The coprocessor has **10.12.194.1/28**, and a DHCP server restricted to that link
 assigns host addresses. Open http://10.12.194.1:3000 if mDNS is unavailable.
 This link does not advertise a default router or DNS server, bridge the robot
 network, or enable Internet sharing. Multiple gadgets using this same subnet
-on one computer require assigning separate subnets. Windows may require the
-RNDIS driver documented in Raspberry Pi's official USB gadget project.
+on one computer require assigning separate subnets. macOS selects configuration
+1 (RNDIS), which it does not support, so it is not a supported USB-C host.
 
 A missing USB device controller is reported in the service journal and does not
 prevent the runtime from starting. A registered UDC and valid DTB are structural

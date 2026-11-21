@@ -293,12 +293,26 @@ jobs:
             --python-tarball dist/synapse-python.tar.xz \
             --wheelhouse dist/wheelhouse \
             --output-dir dist/images
+      # Upload the image unzipped. Raspberry Pi Imager and Etcher unwrap only one
+      # archive layer: given a zipped artifact they write the still-compressed
+      # .img.xz raw, and the board's bootloader finds no partition table. With
+      # archive: false the download is the .img.xz itself and flashes directly.
       - uses: actions/upload-artifact@v7
         env:
           NODE_OPTIONS: --use-openssl-ca
         with:
-          name: synapse-${{ matrix.board }}
-          path: dist/images/*
+          path: dist/images/*.img.xz
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          name: synapse-${{ matrix.board }}-metadata
+          path: |
+            dist/images/*.img.xz.sha256
+            dist/images/*.img.xz.json
           if-no-files-found: error
           retention-days: 14
 
@@ -316,12 +330,21 @@ jobs:
         shell: bash
         run: python image_builder/payload/tls_policy.py bundle --output "$RUNNER_TEMP/synapse-ca.pem" --github-env
 
+      # Narrow patterns: a bare synapse-* would also pull the build-only
+      # synapse-image-wheel, synapse-python and synapse-wheelhouse artifacts.
       - uses: actions/download-artifact@v8
         env:
           NODE_OPTIONS: --use-openssl-ca
         with:
           path: dist
-          pattern: synapse-*
+          pattern: synapse-*.img.xz
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        env:
+          NODE_OPTIONS: --use-openssl-ca
+        with:
+          path: dist
+          pattern: synapse-*-metadata
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2

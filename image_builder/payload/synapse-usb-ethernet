@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Do not load g_ether on power-only ports or on the Q6A's USB-A OTG port.
+# Do not create a gadget on power-only ports or on the Q6A's USB-A OTG port.
 [[ -f /etc/synapse-image/usb-gadget-enabled ]] || exit 0
 # Board/carrier firmware may not expose a UDC. This must not block Synapse boot.
 for ((attempt=0; attempt<15; attempt++)); do
@@ -11,10 +11,68 @@ if ! compgen -G '/sys/class/udc/*' >/dev/null; then
     echo 'No USB device controller is exposed; USB-C Ethernet is unavailable on this carrier/firmware.' >&2
     exit 0
 fi
+udc=$(basename "$(compgen -G '/sys/class/udc/*' | head -n 1)")
 # Derive distinct, locally administered MACs for every flashed device. The image
 # ships no shared MAC and does not require a network connection to initialize.
 identity=$(cat /etc/machine-id)
 [[ $identity =~ ^[0-9a-f]{32}$ ]] || { echo 'Missing initialized machine ID.' >&2; exit 1; }
 digest=$(printf '%s' "synapse-usb-$identity" | sha256sum)
 mac_suffix=${digest:0:2}:${digest:2:2}:${digest:4:2}:${digest:6:2}:${digest:8:2}
-modprobe g_ether "dev_addr=02:$mac_suffix" "host_addr=06:$mac_suffix"
+
+# A configfs gadget, not the legacy g_ether module: g_ether sends no Microsoft
+# OS descriptors, so Windows binds its RNDIS interface to usbser as a "USB
+# Serial Device (COMx)" and no network adapter appears. Here configuration 1
+# is RNDIS with OS descriptors (Windows installs its inbox RNDIS driver), and
+# configuration 2 is CDC-ECM for hosts that skip RNDIS. Each function is its
+# own network device; 05-synapse-usb-gadget.network configures whichever one
+# the host activates.
+modprobe libcomposite
+mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
+gadget=/sys/kernel/config/usb_gadget/synapse
+if [[ -e $gadget ]]; then
+    # Already created by an earlier start of this service; rebind if needed.
+    [[ -n $(cat "$gadget/UDC") ]] || echo "$udc" > "$gadget/UDC"
+    exit 0
+fi
+mkdir "$gadget"
+cd "$gadget" || exit 1
+echo 0x1d6b > idVendor   # Linux Foundation
+echo 0x0104 > idProduct  # Multifunction Composite Gadget
+echo 0x0100 > bcdDevice
+echo 0x0200 > bcdUSB
+# Interface Association Descriptors, so Windows loads its composite driver.
+echo 0xef > bDeviceClass
+echo 0x02 > bDeviceSubClass
+echo 0x01 > bDeviceProtocol
+mkdir strings/0x409
+# A per-device serial gives each coprocessor its own Windows adapter.
+echo "${digest:10:16}" > strings/0x409/serialnumber
+echo 'Synapse' > strings/0x409/manufacturer
+echo 'Synapse vision coprocessor' > strings/0x409/product
+
+echo 1 > os_desc/use
+echo 0xcd > os_desc/b_vendor_code
+echo MSFT100 > os_desc/qw_sign
+
+mkdir functions/rndis.usb0
+echo "02:$mac_suffix" > functions/rndis.usb0/dev_addr
+echo "06:$mac_suffix" > functions/rndis.usb0/host_addr
+echo RNDIS > functions/rndis.usb0/os_desc/interface.rndis/compatible_id
+echo 5162001 > functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id
+mkdir configs/c.1 configs/c.1/strings/0x409
+echo 'RNDIS' > configs/c.1/strings/0x409/configuration
+echo 500 > configs/c.1/MaxPower
+ln -s functions/rndis.usb0 configs/c.1/
+ln -s configs/c.1 os_desc/
+
+# The ECM function needs its own MACs; flip one bit of the derived suffix.
+ecm_suffix=$(printf '%02x' $(( 0x${digest:0:2} ^ 0x01 )))${mac_suffix:2}
+mkdir functions/ecm.usb0
+echo "02:$ecm_suffix" > functions/ecm.usb0/dev_addr
+echo "06:$ecm_suffix" > functions/ecm.usb0/host_addr
+mkdir configs/c.2 configs/c.2/strings/0x409
+echo 'CDC Ethernet' > configs/c.2/strings/0x409/configuration
+echo 500 > configs/c.2/MaxPower
+ln -s functions/ecm.usb0 configs/c.2/
+
+echo "$udc" > UDC

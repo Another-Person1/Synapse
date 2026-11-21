@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import xml.etree.ElementTree as xml
@@ -214,3 +215,91 @@ def test_shared_pi_firmware_respects_model_filters_and_enables_cm4_usb_c(
     assert (
         boot / "cmdline.txt"
     ).read_text() == "console=tty1 root=UUID=keep rootwait\n"
+
+
+def test_gadget_boards_require_configfs_rndis_and_ecm(tmp_path):
+    boot = tmp_path / "boot"
+    boot.mkdir()
+    base = [f"CONFIG_{n}=y" for n in ("GPIO_CDEV", "SPI_SPIDEV", "PWM", "SYSFS")]
+    config = boot / "config-6.1"
+    # The legacy g_ether module alone is no longer enough.
+    config.write_text("\n".join(base + ["CONFIG_USB_ETH=m", "CONFIG_USB_ETH_RNDIS=y"]))
+    with pytest.raises(ValueError, match="CONFIG_USB_CONFIGFS"):
+        hardware.check_kernel(tmp_path)
+    config.write_text(
+        "\n".join(
+            base
+            + [
+                "CONFIG_USB_CONFIGFS=m",
+                "CONFIG_USB_CONFIGFS_RNDIS=y",
+                "CONFIG_USB_CONFIGFS_ECM=y",
+            ]
+        )
+    )
+    hardware.check_kernel(tmp_path)
+
+
+def test_usb_gadget_presents_windows_rndis_descriptors():
+    script = (hardware.HERE / "synapse-usb-ethernet").read_text()
+    # Legacy g_ether has no MS OS descriptors: Windows binds it as a COM port.
+    assert "modprobe g_ether" not in script
+    for needle in (
+        "echo 1 > os_desc/use",
+        "echo MSFT100 > os_desc/qw_sign",
+        "echo RNDIS > functions/rndis.usb0/os_desc/interface.rndis/compatible_id",
+        "echo 5162001 > functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id",
+        "ln -s configs/c.1 os_desc/",
+        "ln -s functions/rndis.usb0 configs/c.1/",
+        "ln -s functions/ecm.usb0 configs/c.2/",
+    ):
+        assert needle in script, needle
+    # Windows only ever selects configuration 1, so RNDIS must be in it.
+    assert script.index("configs/c.1/") < script.index("functions/ecm.usb0")
+
+
+def test_gadget_network_wins_over_netplan_usb_match():
+    network = hardware.HERE / "network"
+    files = sorted(p.name for p in network.iterdir() if p.suffix == ".network")
+    gadget = [n for n in files if "gadget" in n]
+    assert gadget == ["05-synapse-usb-gadget.network"]
+    # networkd takes the first match by file name across directories; netplan
+    # writes 10-netplan-*.network for its usb* DHCP-client match.
+    assert gadget[0] < "10-netplan-"
+    text = (network / gadget[0]).read_text()
+    assert "Driver=g_ether" in text and "Name=" not in text
+    assert "Address=10.12.194.1/28" in text and "DHCPServer=yes" in text
+
+
+def test_pi_overlay_restore_runs_after_armbian_overlay_refresh(tmp_path, monkeypatch):
+    # Armbian's bcm2711 hooks recreate /boot/firmware/overlays on kernel
+    # install and removal; run-parts orders hooks by C-locale name.
+    boot = tmp_path / "boot/firmware"
+    (boot / "overlays").mkdir(parents=True)
+    for names in hardware.PI_DTBS.values():
+        (boot / names[0]).touch()
+    for name in ("dwc2", "disable-bt", "uart0-pi5", "pwm-2chan"):
+        (boot / "overlays" / f"{name}.dtbo").touch()
+    (boot / "config.txt").write_text("[all]\n")
+    (boot / "cmdline.txt").write_text("console=tty1 root=UUID=keep rootwait\n")
+    armbian = {
+        "etc/kernel/postinst.d": ["initramfs-tools", "z51-raspi-firmware", "zzz-copy-new-files"],
+        "etc/kernel/postrm.d": ["initramfs-tools", "zzz-remove-old-files"],
+    }
+    for directory, names in armbian.items():
+        (tmp_path / directory).mkdir(parents=True)
+        for name in names:
+            (tmp_path / directory / name).touch()
+    monkeypatch.setattr(
+        hardware,
+        "compile_overlay",
+        lambda source, destination: destination.write_bytes(b"test overlay"),
+    )
+    monkeypatch.setattr(hardware, "merge_overlay", lambda *args: None)
+    hardware.configure_pi(tmp_path)
+    for directory in armbian:
+        hooks = sorted(p.name for p in (tmp_path / directory).iterdir())
+        assert hooks[-1] == hardware.PI_OVERLAY_HOOK
+        hook = tmp_path / directory / hardware.PI_OVERLAY_HOOK
+        assert "synapse-rp1-pwm.dtbo" in hook.read_text()
+        if os.name == "posix":
+            assert hook.stat().st_mode & 0o111
