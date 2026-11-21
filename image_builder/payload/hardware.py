@@ -89,6 +89,11 @@ QCOM = {
         "pwm_pins": [5],
     },
 }
+# Armbian's own header, written by its bsp-cli postinst when the file is absent.
+QCOM_ENV_HEADER = (
+    "# This board boots with GRUB. Only overlay_prefix, overlays and "
+    "user_overlays are read from this file.\n"
+)
 # Allwinner boards apply overlays listed in armbianEnv.txt at boot; SPI1 is
 # already enabled with spidev in the base tree, so only UART/PWM need overlays.
 ALLWINNER = {
@@ -364,6 +369,14 @@ def configure_qcom_dtb(dtb, overlay, board):
         merged.replace(dtb)
 
 
+def register_user_overlay(env, name):
+    """List a /boot/overlay-user overlay in armbianEnv.txt, keeping existing ones."""
+    text = env.read_text() if env.is_file() else QCOM_ENV_HEADER
+    old = re.search(r"^user_overlays=(.*)$", text, re.M)
+    existing = old.group(1).split() if old else []
+    env.write_text(setting(text, "user_overlays", " ".join(dict.fromkeys(existing + [name]))))
+
+
 def configure_qcom(root, board):
     profile = QCOM[board]
     overlay = root / "usr/share/synapse-image" / overlay_name(board)
@@ -373,6 +386,16 @@ def configure_qcom(root, board):
         raise ValueError(f"{board} GRUB device tree is unavailable")
     for dtb in trees:
         configure_qcom_dtb(dtb, overlay, board)
+    # Armbian's grub-with-dtb hook, and its armbian-grub-dtb-overlays watcher
+    # (run whenever armbianEnv.txt changes, e.g. via armbian-config or a
+    # bsp-cli upgrade), rebuild every /boot/armbian-dtb-* from the pristine
+    # kernel DTB plus only the overlays listed in armbianEnv.txt. Register ours
+    # as a user overlay so those rebuilds keep the header SPI enabled.
+    user = root / "boot/overlay-user" / overlay_name(board)
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_bytes(overlay.read_bytes())
+    user.chmod(0o644)
+    register_user_overlay(root / "boot/armbianEnv.txt", user.stem)
     console = profile["console"]
     # Free the header UART for applications, including after kernel upgrades.
     write(
@@ -556,6 +579,12 @@ def validate(root):
                 text=True,
             ).strip()
             assert status == "okay"
+        name = overlay_name(board)
+        user = root / "boot/overlay-user" / name
+        assert user.read_bytes() == (root / "usr/share/synapse-image" / name).read_bytes()
+        env = (root / "boot/armbianEnv.txt").read_text()
+        listed = re.search(r"^user_overlays=(.*)$", env, re.M)
+        assert listed and user.stem in listed.group(1).split()
     elif board in ROCKCHIP:
         env = (root / "boot/armbianEnv.txt").read_text()
         assert all(name in env for name in ROCKCHIP[board]["overlays"])

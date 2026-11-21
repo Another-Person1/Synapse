@@ -189,7 +189,12 @@ runtime virtual environment, exposing `GPIO`, `SPI`, `PWM` and `Serial` APIs.
 Use `gpioinfo`, `ls /dev/spidev*` and `ls /sys/class/pwm` after boot to discover
 actual devices. The kernel-update hooks restore the RP1 overlay after Armbian's
 firmware refresh and reapply the Q6A/Q8B SPI/software-PWM configuration to their
-GRUB DTBs.
+GRUB DTBs. On the Q6A/Q8B the overlay is also installed in `/boot/overlay-user` and
+listed in `user_overlays=` in `/boot/armbianEnv.txt`. Armbian rebuilds every
+`/boot/armbian-dtb-*` from the pristine kernel DTB whenever that file changes, for
+example through `armbian-config` or a bsp-cli upgrade, and applies only the
+overlays listed there. Keep `synapse-q6a-spi` or `synapse-q8b-spi` in that list
+when editing it.
 
 ## Validation and provenance
 

@@ -151,6 +151,54 @@ def test_q8b_overlay_enables_spi20_with_pinctrl_and_pwm_gpio(tmp_path):
         hardware.configure_qcom_dtb(base, overlay, "radxa-dragon-q8b")
 
 
+def test_qcom_user_overlay_registration_keeps_existing_entries(tmp_path):
+    env = tmp_path / "armbianEnv.txt"
+    hardware.register_user_overlay(env, "synapse-q6a-spi")
+    assert env.read_text().startswith(hardware.QCOM_ENV_HEADER)
+    env.write_text("overlay_prefix=qcs6490\nuser_overlays=mine\n")
+    for _ in range(2):
+        hardware.register_user_overlay(env, "synapse-q6a-spi")
+    text = env.read_text()
+    assert "overlay_prefix=qcs6490\n" in text
+    assert text.count("user_overlays=") == 1
+    assert "user_overlays=mine synapse-q6a-spi\n" in text
+
+
+@pytest.mark.skipif(not HAS_DTC, reason="Device tree compiler required")
+def test_qcom_spi_survives_armbian_dtb_rebuild(tmp_path):
+    source = tmp_path / "base.dts"
+    source.write_text("""/dts-v1/;
+/ { compatible = "radxa,dragon-q6a", "qcom,qcm6490";
+    tlmm: gpio { gpio-controller; #gpio-cells = <2>; };
+    soc@0 { geniqup@ac0000 {
+        spi12: spi@a90000 { #address-cells = <1>; #size-cells = <0>; status = "disabled"; };
+    }; };
+};""")
+    root = tmp_path / "root"
+    (root / "boot").mkdir(parents=True)
+    pristine = tmp_path / "pristine.dtb"
+    hardware.compile_overlay(source, pristine)
+    tree = root / "boot/armbian-dtb-6.18"
+    tree.write_bytes(pristine.read_bytes())
+    (root / "boot/armbianEnv.txt").write_text("overlay_prefix=qcs6490\n")
+    hardware.configure_qcom(root, "radxa-dragon-q6a")
+    # What armbian-grub-with-dtb does on a kernel install or armbianEnv.txt
+    # change: start again from the pristine kernel DTB and apply user_overlays.
+    env = (root / "boot/armbianEnv.txt").read_text()
+    names = next(
+        line.split("=", 1)[1].split()
+        for line in env.splitlines()
+        if line.startswith("user_overlays=")
+    )
+    dtbos = [root / "boot/overlay-user" / f"{name}.dtbo" for name in names]
+    hardware.merge_overlay(pristine, dtbos, tree)
+    status = subprocess.check_output(
+        ["fdtget", "-t", "s", str(tree), hardware.QCOM["radxa-dragon-q6a"]["spi_path"], "status"],
+        text=True,
+    ).strip()
+    assert status == "okay"
+
+
 def test_pwm_gpio_is_required_only_when_the_profile_asks_for_it(tmp_path):
     boot = tmp_path / "boot"
     boot.mkdir()
