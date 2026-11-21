@@ -52,19 +52,8 @@ cache = Path(sys.argv[1])
 with build.open_official(build.SOURCES["armbian_index"]) as response:
     index = json.load(response)
 asset = build.select_image(index, sys.argv[2])
-url = asset["file_url"]
-if asset["file_url_sha"] != url + ".sha" or asset.get("file_url_asc", url + ".asc") != url + ".asc":
-    raise SystemExit("Inventory checksum/signature URLs do not match the selected image")
-build.load_mirrors()
-name = url.rsplit("/", 1)[-1]
-with build.open_armbian(asset["file_url_sha"]) as response:
-    checksum = build.parse_checksum(response.read(1024 * 1024).decode(), name)
-base = cache / name
-build.download(url, base, checksum)
-signature = cache / (name + ".asc")
-with build.open_armbian(url + ".asc") as response:
-    signature.write_bytes(response.read(1024 * 1024))
-build.verify_signature(base, signature)
+# Same checksum/signature acceptance rules as image builds (prepare()).
+base = build.fetch_base(asset, sys.argv[2], cache)["base"]
 python_source = cache / f"cpython-{build.SOURCES['python_version']}.tar.gz"
 build.download(build.SOURCES["python_url"], python_source, build.SOURCES["python_sha256"])
 print(base)

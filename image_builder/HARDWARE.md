@@ -101,7 +101,7 @@ through the GPIO character-device interface.
 | Pi 5 / CM5 | 19, 21, 23, 24, 26; SPI0 | 8, 10; UART0 through RP1 | 32, 33; hardware RP1 PWM0, GPIO12/13 |
 | Orange Pi 5 | 19, 21, 23, 24; SPI4 M0 CS1 | 8, 10; UART0 M2 | 16; hardware PWM1 M1 |
 | Orange Pi 5 Plus | 19, 21, 23, 24; SPI0 M2 CS0 | 8, 10; UART6 M1 | 33; hardware PWM14 M0 |
-| ROCK 5B | 19, 21, 23, 24, 26; SPI0 M2 CS0/CS1 | 8, 10; UART2 M0, normally `/dev/ttyFIQ0` | 32; hardware PWM14 M0 |
+| ROCK 5B | 19, 21, 23, 24, 26; SPI0 M2 CS0/CS1 | 8, 10; UART2 M0, normally `/dev/ttyS2` | 32; hardware PWM14 M0 |
 | Dragon Q6A | 19, 21, 23, 24; SPI12 CS0 | 8, 10; UART5, normally `/dev/ttyMSM0` | 5; **software PWM** using GPIO25 |
 | Dragon Q8B | 19, 21, 23, 24; SPI20 CS0 | 8, 10; UART17, normally `/dev/ttyMSM0` | 5; **software PWM** using GPIO42 |
 | Cubie A7Z | 19, 21, 23, 24; SPI1 (enabled in the base tree) | 7, 11; UART2 | 36; hardware PWM0 on PB4 |
@@ -117,9 +117,12 @@ Inspect `/sys/class/pwm` to identify controllers rather than hard-coding chip nu
 
 The ROCK 5B routes its data USB-C through DWC3 controller 0 in peripheral mode
 (the same `synapse-usb-c` overlay as the Orange Pi boards). Header pins 8/10 are
-UART2 M0, which is also the Armbian serial console (`ttyFIQ0`); the image pins the
-kernel console to the display (`console=display` in `/boot/armbianEnv.txt`) and
-masks `serial-getty@ttyFIQ0.service` so the header UART belongs to applications.
+UART2 M0, which the vendor kernel otherwise uses for its `ttyFIQ0` debug console.
+The official `rk3588-uart2-m0` overlay disables that FIQ debugger and exposes the
+pins as a normal `/dev/ttyS2`; the image pins the kernel console to the display
+(`console=display` in `/boot/armbianEnv.txt`) and masks the `ttyS2`/`ttyFIQ0`
+serial gettys so the header UART belongs to applications. U-Boot still prints
+its boot log on these pins before Linux starts.
 SPI0 M2 (pins 19/21/23/24/26) and PWM14 M0 (pin 32) are enabled with the official
 `rk3588-*` overlays.
 
@@ -155,7 +158,7 @@ are not interchangeable solely because headers have a similar physical layout.
 The `synapse` account belongs to `gpio`, `spi` and `dialout`. Narrow udev rules
 grant group access to GPIO chips, SPI devices and exported PWM controls; devices
 are not made world-writable. Header UART login consoles are disabled on Raspberry
-Pi, the Q6A/Q8B (`ttyMSM0`) and the ROCK 5B (`ttyFIQ0`). The separate Orange Pi
+Pi, the Q6A/Q8B (`ttyMSM0`) and the ROCK 5B (`ttyS2`). The separate Orange Pi
 debug console is retained. Raspberry Pi
 Bluetooth serial attachment and analogue audio are disabled to free its UART and
 PWM resources. Camera auto-detection and the Pi 5 cooling-fan controller are retained.

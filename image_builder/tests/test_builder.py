@@ -194,6 +194,13 @@ def test_stable_release_beats_older_community_trunk_for_opted_in_board():
     assert build.select_image({"assets": [trunk, conf]}, "cubie-a7z") == conf
 
 
+def test_recommended_image_beats_same_version_community_trunk():
+    # (26, 11, 0, 130) would otherwise sort above the stable (26, 11, 0).
+    conf = asset("cubie-a7z", version="26.11.0")
+    trunk = community_asset(version="26.11.0-trunk.130")
+    assert build.select_image({"assets": [trunk, conf]}, "cubie-a7z") == conf
+
+
 @pytest.mark.parametrize(
     "change",
     [

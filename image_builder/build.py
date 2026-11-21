@@ -263,6 +263,9 @@ def select_image(index: dict, board: str) -> dict:
         version = tuple(int(x) for x in re.findall(r"\d+", asset["armbian_version"]))
         promoted = str(asset.get("promoted", "false")).lower() == "true"
         return (
+            # A recommended (conf) image always beats a community trunk build,
+            # even one whose trunk counter makes its version tuple sort higher.
+            asset.get("download_repository") != "community",
             version,
             DEBIAN_RELEASES[asset["distro"]],
             promoted,
@@ -345,16 +348,12 @@ def wheel_details(wheel: Path) -> dict:
     }
 
 
-def prepare(
-    board: str,
-    index: dict,
-    wheel: Path,
-    work: Path,
-    python_tarball: Path | None = None,
-    wheelhouse: Path | None = None,
-) -> tuple[Path, dict]:
-    asset = select_image(index, board)
-    wheel_info = wheel_details(wheel)
+def fetch_base(asset: dict, board: str, cache: Path) -> dict:
+    """Download the selected base image and verify its SHA256 and signature.
+
+    Shared by prepare() and build-python.sh so both accept exactly the same
+    sidecar locations.
+    """
     url = asset["file_url"]
     filename = Path(urllib.parse.urlsplit(url).path).name
 
@@ -383,19 +382,40 @@ def prepare(
         raise BuildError(f"Inventory {label} URL does not match the selected image")
 
     checksum_url = sidecar_url("file_url_sha", ".sha")
+    signature_url = sidecar_url("file_url_asc", ".asc")
     load_mirrors()
-    opener = open_armbian if checksum_url.startswith("https://dl.armbian.com/") else open_official
-    with opener(checksum_url) as response:
+    # open_armbian adds mirror fallback for dl.armbian.com and is otherwise
+    # identical to open_official.
+    with open_armbian(checksum_url) as response:
         checksum = parse_checksum(response.read(1024 * 1024).decode(), filename)
-    cache = work / "downloads"
     base = cache / filename
     download(url, base, checksum)
-    signature_url = sidecar_url("file_url_asc", ".asc")
     signature = cache / (filename + ".asc")
-    opener = open_armbian if signature_url.startswith("https://dl.armbian.com/") else open_official
-    with opener(signature_url) as response:
+    with open_armbian(signature_url) as response:
         signature.write_bytes(response.read(1024 * 1024))
-    signers = verify_signature(base, signature)
+    return {
+        "base": base,
+        "checksum": checksum,
+        "signature": signature,
+        "signature_url": signature_url,
+        "signers": verify_signature(base, signature),
+    }
+
+
+def prepare(
+    board: str,
+    index: dict,
+    wheel: Path,
+    work: Path,
+    python_tarball: Path | None = None,
+    wheelhouse: Path | None = None,
+) -> tuple[Path, dict]:
+    asset = select_image(index, board)
+    wheel_info = wheel_details(wheel)
+    cache = work / "downloads"
+    fetched = fetch_base(asset, board, cache)
+    base, checksum, signers = fetched["base"], fetched["checksum"], fetched["signers"]
+    signature, signature_url = fetched["signature"], fetched["signature_url"]
     payload = work / "payload"
     if payload.exists():
         raise BuildError(

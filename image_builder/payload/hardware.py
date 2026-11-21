@@ -29,14 +29,16 @@ ROCKCHIP = {
     },
     "rock-5b": {
         "dtb": "rockchip/rk3588-rock-5b.dtb",
-        "compatible": ["radxa,rock-5b", "rockchip,rk3588"],
+        # The SoC-wide "rockchip,rk3588" would accept any RK3588 board's tree.
+        "compatible": ["radxa,rock-5b"],
         "overlays": [
             "rk3588-spi0-m2-cs0-cs1-spidev",
             "rk3588-uart2-m0",
             "rk3588-pwm14-m0",
         ],
         "symbols": ("spi0", "uart2", "pwm14"),
-        # ttyFIQ0 (header pins 8/10) belongs to applications, so the kernel
+        # rk3588-uart2-m0 disables the vendor fiq_debugger (ttyFIQ0) and turns
+        # header pins 8/10 into a plain /dev/ttyS2 for applications; the kernel
         # console stays on the display and no login shell uses the header UART.
         "armbian_env": {"console": "display"},
         "spi_pins": [19, 21, 23, 24, 26],
@@ -72,7 +74,9 @@ QCOM = {
 ALLWINNER = {
     "cubie-a7z": {
         "dtb": "allwinner/sun60i-a733-cubie-a7z.dtb",
+        # The vendor tree carries only SoC compatibles, so pin the board model.
         "compatible": ["allwinner,a733", "arm,sun60iw2p1"],
+        "model": "Radxa Cubie A7Z",
         "overlay_dir": "dtb/allwinner/overlay",
         "overlays": ["sun60i-a733-uart2", "sun60i-a733-pwm0"],
         "symbols": ("spi1", "uart2", "pwm0_0"),
@@ -373,6 +377,11 @@ def configure_allwinner(root, board):
     if not base.is_file() or not all(p.is_file() for p in overlays):
         raise ValueError(f"{board}: expected official header overlays are unavailable")
     compatible(base, profile["compatible"])
+    model = subprocess.check_output(
+        ["fdtget", "-t", "s", str(base), "/", "model"], text=True
+    ).strip()
+    if model != profile["model"]:
+        raise ValueError(f"Unexpected device tree model for {board}: {model}")
     # Test the complete combination against the board tree, not each alone.
     with tempfile.TemporaryDirectory() as temporary:
         combined = Path(temporary) / "combined.dtb"
