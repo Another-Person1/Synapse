@@ -123,8 +123,8 @@ def test_q8b_overlay_enables_spi20_with_pinctrl_and_pwm_gpio(tmp_path):
 / { compatible = "radxa,dragon-q8b", "qcom,sc8280xp";
     tlmm: gpio { gpio-controller; #gpio-cells = <2>; };
     soc@0 { geniqup@8c0000 {
-        qup_spi20_data_clk: pinctrl { };
-        qup_spi20_cs: pinctrl { };
+        qup_spi20_data_clk: pinctrl-data { };
+        qup_spi20_cs: pinctrl-cs { };
         spi20: spi@890000 { #address-cells = <1>; #size-cells = <0>; status = "disabled"; };
     }; };
 };""")
