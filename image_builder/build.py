@@ -29,6 +29,9 @@ TRUNK_VERSION = re.compile(r"\d+\.\d+\.\d+-trunk\.\d+")
 # Deliberately explicit: a new Debian stable must be qualified before enabling it.
 DEBIAN_RELEASES = {"trixie": 13, "bookworm": 12}
 MIRROR_REGISTRY = "https://dl.armbian.com/mirrors"
+# Registered mirror hosts are also trusted for Armbian's /cache/ artifact
+# namespace, which is where cache.armbian.com redirects community sidecars.
+MIRROR_CACHE_BASES = set()
 MIRROR_BASES = set()
 SIGNING_FINGERPRINTS = {
     "DF00FAF1C577104B50BF1D0093D6889F9F0E78D5",
@@ -69,7 +72,7 @@ def official_url(url: str) -> str:
         or (host == "github.com" and parsed.path.startswith("/armbian/"))
         # GitHub's release-asset CDN, reached only through the official URLs above.
         or host == "release-assets.githubusercontent.com"
-        or any(url.startswith(base) for base in MIRROR_BASES)
+        or any(url.startswith(base) for base in MIRROR_BASES | MIRROR_CACHE_BASES)
     )
     if not allowed:
         raise BuildError(
@@ -100,6 +103,7 @@ def load_mirrors():
     if not isinstance(registry, dict):
         raise BuildError("Unexpected Armbian mirror registry format")
     bases = set()
+    cache_bases = set()
     for region in registry.values():
         if not isinstance(region, list):
             raise BuildError("Unexpected Armbian mirror registry entries")
@@ -116,10 +120,15 @@ def load_mirrors():
                 and not any(x in parsed.path.split("/") for x in (".", ".."))
             ):
                 bases.add(url.rstrip("/") + "/")
+                # cache.armbian.com redirects artifact paths to the same
+                # mirror hosts under /cache/ instead of the /dl/ path above.
+                cache_bases.add(f"https://{parsed.hostname}/cache/")
     if not bases:
         raise BuildError("Armbian did not publish any usable HTTPS mirrors")
     MIRROR_BASES.clear()
     MIRROR_BASES.update(bases)
+    MIRROR_CACHE_BASES.clear()
+    MIRROR_CACHE_BASES.update(cache_bases)
 
 
 def open_armbian(url):

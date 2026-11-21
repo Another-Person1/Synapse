@@ -254,6 +254,34 @@ def test_external_mirror_redirect_is_rejected_before_connecting():
         )
 
 
+def test_cache_artifact_redirect_to_registered_mirror_host_is_allowed(monkeypatch):
+    # cache.armbian.com redirects artifact paths to registered mirror hosts
+    # under /cache/; the registry itself only lists their /dl/ bases.
+    monkeypatch.setattr(build, "MIRROR_BASES", {"https://mirror.example/dl/"})
+    monkeypatch.setattr(
+        build, "MIRROR_CACHE_BASES", {"https://mirror.example/cache/"}
+    )
+    handler = build.OfficialRedirects()
+    request = handler.redirect_request(
+        urllib.request.Request("https://cache.armbian.com/artifacts/a/b.img.xz.sha"),
+        None,
+        302,
+        "Found",
+        {},
+        "https://mirror.example/cache/artifacts/a/b.img.xz.sha",
+    )
+    assert request is not None
+    with pytest.raises(build.BuildError, match="outside official"):
+        handler.redirect_request(
+            urllib.request.Request("https://cache.armbian.com/artifacts/a/b.img.xz.sha"),
+            None,
+            302,
+            "Found",
+            {},
+            "https://unregistered.example/cache/artifacts/a/b.img.xz.sha",
+        )
+
+
 @pytest.mark.parametrize(
     "format_string",
     [

@@ -57,7 +57,9 @@ verification remain mandatory.
 Base images are accepted only from Armbian's official endpoints: `dl.armbian.com`,
 `github.armbian.com`, `raw.githubusercontent.com/armbian/`, `codeload.github.com/python/cpython/`,
 GitHub release assets under `github.com/armbian/`, Armbian's own `cache.armbian.com`
-artifact cache, and the pinned mirror registry. Boards with no recommended image may
+artifact cache, and the pinned mirror registry (whose registered hosts are also
+trusted for the `/cache/` artifact namespace that `cache.armbian.com` redirects
+into). Boards with no recommended image may
 opt into a community (`csc`) build via `allow_community` in `boards.json`; such builds
 come from `github.com/armbian/community` releases with their checksum/signature sidecars
 on `cache.armbian.com`, are still SHA256- and pinned-key GPG-verified, and `ci`/`nightly`
