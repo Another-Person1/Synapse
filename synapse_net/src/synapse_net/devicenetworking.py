@@ -298,28 +298,26 @@ class NetworkingManager:
     @classmethod
     def _applyNetplan(cls, address: StaticAddress) -> None:
         prefix = f"ethernets.{address.interface}"
-        cls._runCommand(
-            cls._sudo(
-                [
-                    "netplan",
-                    "set",
-                    "--origin-hint",
-                    "synapse-static",
-                    f"{prefix}.dhcp4=true",
-                ]
+        # This definition replaces any catch-all for the interface, so keep
+        # DHCP, link-local addressing for direct cables, and a non-blocking
+        # boot when the cable is unplugged.
+        for setting in (
+            "dhcp4=true",
+            "link-local=[ipv4,ipv6]",
+            "optional=true",
+            f"addresses=[{address.cidr}]",
+        ):
+            cls._runCommand(
+                cls._sudo(
+                    [
+                        "netplan",
+                        "set",
+                        "--origin-hint",
+                        "synapse-static",
+                        f"{prefix}.{setting}",
+                    ]
+                )
             )
-        )
-        cls._runCommand(
-            cls._sudo(
-                [
-                    "netplan",
-                    "set",
-                    "--origin-hint",
-                    "synapse-static",
-                    f"{prefix}.addresses=[{address.cidr}]",
-                ]
-            )
-        )
         cls._runCommand(cls._sudo(["netplan", "apply"]))
 
     @classmethod

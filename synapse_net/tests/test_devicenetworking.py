@@ -216,7 +216,19 @@ def test_set_static_address_uses_netplan() -> None:
         "synapse-static",
         "ethernets.enp3s0.addresses=[10.12.34.11/24]",
     ] in commands
-    assert ["sudo", "-n", "netplan", "apply"] in commands
+    # The per-interface definition supersedes the image's catch-all, so it
+    # must keep direct-link addressing and stay optional at boot.
+    for setting in ("link-local=[ipv4,ipv6]", "optional=true"):
+        assert [
+            "sudo",
+            "-n",
+            "netplan",
+            "set",
+            "--origin-hint",
+            "synapse-static",
+            f"ethernets.enp3s0.{setting}",
+        ] in commands
+    assert commands[-1] == ["sudo", "-n", "netplan", "apply"]
 
 
 def test_set_static_address_replaces_ip_fallback_address() -> None:

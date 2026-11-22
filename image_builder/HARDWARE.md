@@ -53,6 +53,18 @@ peripherals and USB Ethernet adapters to remaining supported host ports.
 On Orange Pi 5 vendor kernels, the conflicting Armbian USB host-forcing service
 is masked. Kernel adapters and other ports retain their host support.
 
+On the Orange Pi 5, Orange Pi 5 Plus and ROCK 5B, the data USB-C port is
+managed by an FUSB302 Type-C controller that sets the USB controller's role
+through a role switch. Armbian's trees declare it dual-role, so a computer on
+the other end could win the host role, and the board would never appear. The
+`synapse-usb-c` overlay makes that connector sink-only and device-only. Every
+host then becomes the source and USB host, and data-role swaps are refused.
+The overlay leaves the DWC3 controller in OTG mode on its role switch. A fixed
+peripheral mode would stop the FUSB302 driver from loading, and with it VBUS
+detection and USB3 lane orientation. The port therefore never supplies power,
+even to a USB device plugged into it. The Raspberry Pi family needs no change,
+because its USB-C port has fixed pull-down resistors and is always a device.
+
 The gadget is a configfs composite device (`1d6b:0104`) built by
 `synapse-usb-ethernet`. Configuration 1 is RNDIS with Microsoft OS descriptors,
 so Windows 10/11 installs its built-in RNDIS driver automatically. Configuration
@@ -75,8 +87,21 @@ prevent the runtime from starting. A registered UDC and valid DTB are structural
 checks; cable orientation, host drivers, power and actual enumeration still need
 physical testing, including connection after boot.
 
-Built-in Ethernet and supported USB Ethernet adapters use Armbian's DHCP
-configuration, with IPv4/IPv6 link-local addressing available for direct links.
+Built-in Ethernet and supported USB Ethernet adapters use DHCP, with IPv4/IPv6
+link-local addressing for direct links.
+
+**Direct Ethernet, no router:** connect a computer straight to the board's
+Ethernet port. With no DHCP server, both ends choose IPv4 link-local
+(169.254.0.0/16) addresses; Windows does this by itself, typically within a
+minute. Open http://synapse.local:3000. If mDNS is unavailable, open
+http://169.254.194.1:3000: the board tries that address first on its built-in
+Ethernet. A second board on the same link detects the conflict and picks
+another address, so use `synapse.local` names there. The image never runs a
+DHCP server on Ethernet, so it cannot hand out addresses on a robot network.
+A static address set from the Synapse UI applies to that one interface, and
+keeps DHCP and link-local addressing alongside it. The image's catch-all
+netplan definitions are named `zz-...` so per-interface definitions sort
+ahead of them.
 Adapters still require their drivers in the selected Armbian kernel. They do not
 receive the gadget's DHCP-server configuration. Display current addresses using
 `ip address`. The image does not assume a particular physical Ethernet port.
@@ -124,8 +149,11 @@ Inspect `/sys/class/pwm` to identify controllers rather than hard-coding chip nu
 
 ### ROCK 5B
 
-The ROCK 5B routes its data USB-C through DWC3 controller 0 in peripheral mode
-(the same `synapse-usb-c` overlay as the Orange Pi boards). Header pins 8/10 are
+The ROCK 5B routes its data USB-C through DWC3 controller 0, forced to device
+mode through its FUSB302 Type-C controller (the same `synapse-usb-c` overlay
+as the Orange Pi boards). That port is also the board's power input, which was
+already sink-only. The overlay additionally refuses data-role swaps, so a
+USB-PD charger or computer cannot make the board the USB host. Header pins 8/10 are
 UART2 M0, which the vendor kernel otherwise uses for its `ttyFIQ0` debug console.
 The official `rk3588-uart2-m0` overlay disables that FIQ debugger and exposes the
 pins as a normal `/dev/ttyS2`; the image pins the kernel console to the display

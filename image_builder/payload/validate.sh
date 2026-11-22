@@ -22,6 +22,10 @@ python3 /tmp/synapse-build/runtime_libraries.py check /opt/synapse-python
 test -x /usr/lib/systemd/systemd-networkd-wait-online
 python3 /tmp/synapse-build/hardware.py validate
 netplan generate
+# The direct-link drop-in in /etc/systemd/network targets this generated name.
+test -f /run/systemd/network/10-netplan-zz-synapse-ethernet.network
+grep -Eqx 'LinkLocalAddressing=(yes|ipv4)' /run/systemd/network/10-netplan-zz-synapse-ethernet.network
+test -f /etc/systemd/network/10-netplan-zz-synapse-ethernet.network.d/50-synapse-direct-link.conf
 /home/synapse/.venv/bin/python /tmp/synapse-build/smoke.py
 systemctl is-enabled synapse-runtime.service synapse-firstboot.service ssh.service avahi-daemon.service synapse-usb-ethernet.service systemd-networkd.service
 systemd-analyze verify /etc/systemd/system/synapse-runtime.service /etc/systemd/system/synapse-firstboot.service /etc/systemd/system/synapse-usb-ethernet.service

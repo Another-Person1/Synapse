@@ -2,14 +2,20 @@ network:
   version: 2
   renderer: networkd
   ethernets:
-    all-eth-interfaces:
+    # netplan renders each definition as 10-netplan-<id>.network, and networkd
+    # uses the first file (by name) that matches an interface. These catch-alls
+    # are named "zz-..." so that a per-interface definition, such as the static
+    # address the Synapse UI sets on eth0 or end1, sorts first and takes effect.
+    zz-synapse-ethernet:
       match:
         name: "e*"
       dhcp4: true
       dhcp6: true
+      # A direct cable to a computer has no DHCP server: both ends fall back to
+      # 169.254.0.0/16 and synapse.local resolves over mDNS.
       link-local: [ipv4, ipv6]
       optional: true
-    synapse-usb-adapters:
+    zz-synapse-usb-adapters:
       match:
         name: "usb*"
       dhcp4: true

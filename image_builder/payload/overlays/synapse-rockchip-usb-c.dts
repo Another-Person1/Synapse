@@ -1,11 +1,30 @@
-// Armbian's Orange Pi 5/5 Plus trees route data USB-C through DWC3 controller 0.
+// Armbian's vendor Orange Pi 5/5 Plus and ROCK 5B trees route data USB-C through
+// DWC3 controller 0, whose host/device role is driven by an FUSB302 Type-C
+// controller (usb_con) through a usb-role-switch. The vendor connectors are
+// dual-role: a computer on the other end may win the source/host role, and the
+// board then never enumerates. Fixing the DWC3 in peripheral mode does not
+// help: it stops DWC3 registering its role switch, so the FUSB302 port
+// never probes and VBUS detection (rockchip,typec-vbus-det) and USB3 lane
+// orientation never happen.
+//
+// Instead make the connector sink-only and device-only. Every host then becomes
+// the source and USB host, Type-C cannot swap the data role, and the FUSB302
+// switches DWC3 (left in OTG mode on its role switch) to device mode on attach.
 /dts-v1/;
 /plugin/;
 / {
     fragment@0 {
+        target = <&usb_con>;
+        __overlay__ {
+            power-role = "sink";
+            try-power-role = "sink";
+            data-role = "device";
+        };
+    };
+    fragment@1 {
         target = <&usbdrd_dwc3_0>;
         __overlay__ {
-            dr_mode = "peripheral";
+            dr_mode = "otg";
             status = "okay";
         };
     };

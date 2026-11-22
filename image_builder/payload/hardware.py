@@ -129,6 +129,19 @@ install -m 0644 /usr/share/synapse-image/synapse-rp1-pwm.dtbo /boot/firmware/ove
 """
 
 
+# netplan's file for the catch-all Ethernet definition in 90-synapse-ethernet.yaml.
+ETHERNET_NETWORK = "10-netplan-zz-synapse-ethernet.network"
+# A direct cable to a computer has no DHCP server. Both ends then pick an IPv4
+# link-local address; try a predictable one first so the dashboard is reachable
+# at a documented address when mDNS is not. Conflict detection still applies,
+# so a second coprocessor on the same link chooses another address.
+DIRECT_LINK_ADDRESS = "169.254.194.1"
+DIRECT_LINK_DROPIN = f"""# Synapse: predictable IPv4 link-local address for direct Ethernet links.
+[Network]
+IPv4LLStartAddress={DIRECT_LINK_ADDRESS}
+"""
+
+
 def write(root, name, content, mode=0o644):
     path = root / name.lstrip("/")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -296,6 +309,34 @@ dtoverlay=dwc2,dr_mode=peripheral
     }
 
 
+def symbol_path(dtb, symbol):
+    return subprocess.check_output(
+        ["fdtget", "-t", "s", str(dtb), "/__symbols__", symbol], text=True
+    ).strip()
+
+
+def dt_string(dtb, path, name):
+    return subprocess.check_output(
+        ["fdtget", "-t", "s", str(dtb), path, name], text=True
+    ).strip()
+
+
+def check_rockchip_usb_c(dtb, board):
+    """The USB-C connector must be device-only, with DWC3 left on its role switch."""
+    connector = symbol_path(dtb, "usb_con")
+    for name, value in (("power-role", "sink"), ("data-role", "device")):
+        if dt_string(dtb, connector, name) != value:
+            raise ValueError(f"{board}: USB-C connector {name} is not {value}")
+    controller = symbol_path(dtb, "usbdrd_dwc3_0")
+    properties = subprocess.check_output(
+        ["fdtget", "-p", str(dtb), controller], text=True
+    ).split()
+    # A fixed dr_mode would stop DWC3 registering the role switch the Type-C
+    # controller needs, and that controller would then never probe.
+    if "usb-role-switch" not in properties or dt_string(dtb, controller, "dr_mode") != "otg":
+        raise ValueError(f"{board}: USB-C controller is not on its Type-C role switch")
+
+
 def configure_rockchip(root, board):
     profile = ROCKCHIP[board]
     boot = root / "boot"
@@ -317,20 +358,11 @@ def configure_rockchip(root, board):
         combined = Path(temporary) / "combined.dtb"
         merge_overlay(base, merged, combined)
         for symbol in (*profile["symbols"], *(["usbdrd_dwc3_0"] if gadget else [])):
-            path = subprocess.check_output(
-                ["fdtget", "-t", "s", str(combined), "/__symbols__", symbol], text=True
-            ).strip()
-            state = subprocess.check_output(
-                ["fdtget", "-t", "s", str(combined), path, "status"], text=True
-            ).strip()
-            if state != "okay":
+            path = symbol_path(combined, symbol)
+            if dt_string(combined, path, "status") != "okay":
                 raise ValueError(f"{board}: overlay did not enable {symbol}")
         if gadget:
-            role = subprocess.check_output(
-                ["fdtget", "-t", "s", str(combined), path, "dr_mode"], text=True
-            ).strip()
-            if role != "peripheral":
-                raise ValueError(f"{board}: USB-C is not configured for device mode")
+            check_rockchip_usb_c(combined, board)
     env = boot / "armbianEnv.txt"
     text = env.read_text()
     for key, additions in (
@@ -498,6 +530,11 @@ def configure_common(root):
             source.read_text(),
             0o600 if source.suffix == ".yaml" else 0o644,
         )
+    write(
+        root,
+        f"etc/systemd/network/{ETHERNET_NETWORK}.d/50-synapse-direct-link.conf",
+        DIRECT_LINK_DROPIN,
+    )
     write(root, "etc/modules-load.d/synapse-io.conf", "spidev\n")
 
 

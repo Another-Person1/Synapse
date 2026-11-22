@@ -151,6 +151,77 @@ def test_q8b_overlay_enables_spi20_with_pinctrl_and_pwm_gpio(tmp_path):
         hardware.configure_qcom_dtb(base, overlay, "radxa-dragon-q8b")
 
 
+VENDOR_ROCKCHIP_USB_C = """/dts-v1/;
+/ { compatible = "xunlong,orangepi-5", "rockchip,rk3588s";
+    usbdrd3_0 { usbdrd_dwc3_0: usb@fc000000 {
+        dr_mode = "otg"; usb-role-switch; status = "okay"; }; };
+    i2c@fec80000 { fusb302@22 { compatible = "fcs,fusb302";
+        usb_con: connector { compatible = "usb-c-connector";
+            data-role = "dual"; power-role = "dual"; try-power-role = "sink"; }; }; };
+};"""
+
+
+@pytest.mark.skipif(not HAS_DTC, reason="Device tree compiler required")
+def test_rockchip_usb_c_is_forced_to_device_through_type_c(tmp_path):
+    # Shape of Armbian's vendor rk3588s-orangepi-5 / rk3588-orangepi-5-plus /
+    # rk3588-rock-5b trees: dual-role FUSB302 connector, DWC3 on a role switch.
+    source = tmp_path / "base.dts"
+    source.write_text(VENDOR_ROCKCHIP_USB_C)
+    base, overlay = tmp_path / "base.dtb", tmp_path / "usb-c.dtbo"
+    combined = tmp_path / "combined.dtb"
+    hardware.compile_overlay(source, base)
+    with pytest.raises(ValueError, match="power-role"):
+        hardware.check_rockchip_usb_c(base, "orangepi5")
+    hardware.compile_overlay(hardware.HERE / "overlays/synapse-rockchip-usb-c.dts", overlay)
+    hardware.merge_overlay(base, [overlay], combined)
+    hardware.check_rockchip_usb_c(combined, "orangepi5")
+    connector = hardware.symbol_path(combined, "usb_con")
+    assert hardware.dt_string(combined, connector, "try-power-role") == "sink"
+    # The old approach (fixed peripheral mode) must be rejected.
+    source.write_text(VENDOR_ROCKCHIP_USB_C.replace('dr_mode = "otg"', 'dr_mode = "peripheral"'))
+    hardware.compile_overlay(source, base)
+    peripheral = tmp_path / "peripheral.dtb"
+    hardware.merge_overlay(base, [overlay], peripheral)
+    hardware.check_rockchip_usb_c(peripheral, "orangepi5")  # overlay restores otg
+
+
+def test_rockchip_usb_c_overlay_keeps_the_role_switch():
+    text = (hardware.HERE / "overlays/synapse-rockchip-usb-c.dts").read_text()
+    assert 'dr_mode = "peripheral"' not in text
+    for needle in ('power-role = "sink"', 'data-role = "device"', 'dr_mode = "otg"'):
+        assert needle in text
+
+
+def test_ethernet_catch_alls_yield_to_per_interface_definitions():
+    import re
+
+    text = (hardware.HERE / "network/90-synapse-ethernet.yaml").read_text()
+    # Definition ids are the keys indented four spaces under "ethernets:".
+    ids = re.findall(r"^    ([A-Za-z0-9_.-]+):\s*$", text, re.M)
+    assert ids == ["zz-synapse-ethernet", "zz-synapse-usb-adapters"]
+    # networkd takes the first matching 10-netplan-<id>.network by name; a
+    # static address the UI sets on eth0/end1/enP4p65s0 must sort first.
+    for interface in ("eth0", "end1", "enP4p65s0", "enx001122334455", "usb0"):
+        assert all(f"10-netplan-{interface}.network" < f"10-netplan-{i}.network" for i in ids)
+    assert text.count("link-local: [ipv4, ipv6]") == 2
+    assert text.count("optional: true") == 2
+    assert hardware.ETHERNET_NETWORK == f"10-netplan-{ids[0]}.network"
+
+
+def test_direct_link_dropin_targets_the_ethernet_catch_all(tmp_path):
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc/hosts").write_text("127.0.0.1 localhost\n")
+    hardware.configure_common(tmp_path)
+    dropin = (
+        tmp_path
+        / "etc/systemd/network"
+        / f"{hardware.ETHERNET_NETWORK}.d/50-synapse-direct-link.conf"
+    )
+    assert "IPv4LLStartAddress=169.254.194.1" in dropin.read_text()
+    # A drop-in directory beside it must not be mistaken for a network file.
+    assert not (tmp_path / "etc/systemd/network" / hardware.ETHERNET_NETWORK).exists()
+
+
 def test_qcom_user_overlay_registration_keeps_existing_entries(tmp_path):
     env = tmp_path / "armbianEnv.txt"
     hardware.register_user_overlay(env, "synapse-q6a-spi")
